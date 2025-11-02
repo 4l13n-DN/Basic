@@ -1,0 +1,3 @@
+BASH
+IP=ip de maquina a analizar
+host="IP"; t=$(ping -c1 -W1 "$host" 2>/dev/null | grep -oE "ttl=[0-9]+" | cut -d= -f2); if [ -z "$t" ]; then echo "Sin respuesta de $host"; elif [ "$t" -le 64 ]; then os="Unix/Linux (TTL base 64)"; elif [ "$t" -le 128 ]; then os="Windows (TTL base 128)"; else os="Router/Dispositivo de red (TTL base 255)"; fi; echo "$host → TTL=$t → $os"
