@@ -1,0 +1,6 @@
+grep -E '^[0-9]+/tcp[[:space:]]+open' archivosalidadenmap | cut -d/ -f1 | paste -sd, -
+
+Ejemplo 
+grep -E '^[0-9]+/tcp[[:space:]]+open' puertos.txt | cut -d/ -f1 | paste -sd, -
+
+22,80,139,445,8009,8080
