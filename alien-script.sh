@@ -91,7 +91,7 @@ escaneo_nmap_rapido() {
     echo -e "    ${C_CYN}nmap -T4 -sS --open -n -Pn --min-rate 1000 ${host}${C_RST}"
     echo
 
-    nmap_out=$(nmap -T4 -sS --open -n -Pn --min-rate 1000 "${host}" 2>/dev/null)
+    nmap_out=$(nmap -T4 -sS --open -p- -n -Pn --min-rate 3000 "${host}" 2>/dev/null)
 
     # Parser simple y robusto
     local puertos_nl
