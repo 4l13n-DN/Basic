@@ -88,7 +88,7 @@ escaneo_nmap_rapido() {
     local nmap_out
     
     echo -e "${C_BLU}[*] FASE 2: Escaneo SYN rápido de puertos...${C_RST}"
-    echo -e "    ${C_CYN}nmap -T4 -sS --open -n -Pn --min-rate 1000 ${host}${C_RST}"
+    echo -e "    ${C_CYN}nmap -T4 -sS --open -p- -n -Pn --min-rate 3000 ${host}${C_RST}"
     echo
 
     nmap_out=$(nmap -T4 -sS --open -p- -n -Pn --min-rate 3000 "${host}" 2>/dev/null)
