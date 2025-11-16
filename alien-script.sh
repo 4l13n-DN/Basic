@@ -1,102 +1,183 @@
 #!/usr/bin/env bash
-# Scanner rápido: TTL + Nmap
+#
+#   TTL & Port Scanner :: by 0xAlienSec (v4)
+#
+#   Un scanner rápido de dos fases:
+#   1. Detección de OS (por TTL) y escaneo SYN ultra-rápido.
+#   2. (Opcional) Escaneo profundo (-sV -sC) solo en puertos abiertos.
+#
 set -euo pipefail
 
-# --- [0] Validación de dependencias ---
+# --- [0] Configuración Global ---
+C_RST="\e[0m"
+C_RED="\e[31m"
+C_GRN="\e[32m"
+C_YEL="\e[33m"
+C_BLU="\e[34m"
+C_CYN="\e[36m"
+
+# Variables de flags
+AGGRESSIVE_SCAN=0
+TARGET_IP=""
+
+trap 'echo -e "\n\n${C_YEL}[!] Escaneo interrumpido.${C_RST}"; exit 1' INT
+
+# --- [1] Funciones de Ayuda y Banner ---
+show_help() {
+    echo -e "${C_GRN}Uso:${C_RST} sudo $0 [opciones] <IP_OBJETIVO>"
+    echo
+    echo -e "${C_YEL}Opciones:${C_RST}"
+    echo -e "  ${C_CYN}-a${C_RST}         Activa el 'Escaneo Agresivo' (Versión y Scripts) sobre los puertos encontrados."
+    echo -e "  ${C_CYN}-h${C_RST}         Muestra este menú de ayuda."
+    echo
+    echo -e "${C_YEL}Ejemplo:${C_RST}"
+    echo -e "  sudo $0 10.10.10.5"
+    echo -e "  sudo $0 -a 10.10.10.5"
+    exit 0
+}
+
+show_banner() {
+    echo -e "${C_BLU}===============================================${C_RST}"
+    echo -e "   ${C_GRN}TTL & Port Scanner${C_RST} :: ${C_YEL}by 0xAlienSec${C_RST}"
+    echo -e "${C_BLU}===============================================${C_RST}"
+    echo
+}
+
+# --- [2] Funciones de Validación ---
 check_deps() {
-    for cmd in ping nmap awk; do
+    for cmd in ping nmap awk grep cut sudo; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
-            echo "[-] Comando requerido no encontrado: $cmd"
+            echo -e "${C_RED}[-] Comando requerido no encontrado: $cmd${C_RST}"
             exit 1
         fi
     done
 }
 
-# --- [1] Obtener IP objetivo (por argumento o pregunta) ---
-obtener_ip() {
-    if [[ $# -ge 1 ]]; then
-        TARGET_IP="$1"
-    else
-        read -rp "Ingresa la IP objetivo: " TARGET_IP
-    fi
-
-    if [[ -z "${TARGET_IP}" ]]; then
-        echo "[-] No ingresaste una IP. Saliendo."
+check_root() {
+    if [[ "${EUID}" -ne 0 ]]; then
+        echo -e "${C_RED}[-] Este script requiere privilegios de root para -sS (SYN Scan).${C_RST}"
+        echo -e "${C_YEL}[*] Por favor, ejecútalo con 'sudo'${C_RST}"
         exit 1
     fi
 }
 
-# --- [2] Detectar TTL y sistema operativo probable ---
+# --- [3] Funciones de Escaneo ---
 detectar_ttl_y_os() {
     local host="$1"
     local ttl
+    echo -e "${C_BLU}[*] FASE 1: Identificación de TTL y SO...${C_RST}"
 
-    echo "[*] Ping a ${host} para obtener TTL..."
     ttl=$(ping -c1 -W1 "$host" 2>/dev/null | awk -F'ttl=' '/ttl=/{split($2,a," "); print a[1]; exit}')
 
     if [[ -z "${ttl}" ]]; then
-        echo "[!] Sin respuesta ICMP desde ${host}. No se pudo obtener TTL."
-        return 1
+        echo -e "${C_YEL}[!] Sin respuesta ICMP (Host discovery -Pn será usado por Nmap).${C_RST}"
+        return
     fi
 
     local os="Desconocido"
-    if   (( ttl <= 64 ));  then os="Unix/Linux (TTL ≤ 64)"
-    elif (( ttl <= 128 )); then os="Windows (TTL ≤ 128)"
-    else                       os="Router/Dispositivo de red (TTL > 128)"
+    if   (( ttl <= 64 ));  then os="Unix/Linux (TTL: ${ttl})"
+    elif (( ttl <= 128 )); then os="Windows (TTL: ${ttl})"
+    else                       os="Router/Dispositivo (TTL: ${ttl})"
     fi
-
-    echo "[+] TTL: ${ttl}"
-    echo "[+] SO probable: ${os}"
+    echo -e "${C_GRN}[+] SO Probable: ${os}${C_RST}"
 }
 
-# --- [3] Ejecutar Nmap y extraer puertos abiertos ---
-escaneo_nmap_puertos() {
+# --- [MODIFICADA] ---
+escaneo_nmap_rapido() {
     local host="$1"
-    local puertos
-
-    echo "[*] Ejecutando Nmap (T4, SYN, solo puertos abiertos)..."
-    echo "    nmap -T4 -sS --open ${host}"
+    local nmap_out
+    
+    echo -e "${C_BLU}[*] FASE 2: Escaneo SYN rápido de puertos...${C_RST}"
+    echo -e "    ${C_CYN}nmap -T4 -sS --open -n -Pn --min-rate 1000 ${host}${C_RST}"
     echo
 
-    puertos=$(nmap -T4 -sS --open -oG - "$host" 2>/dev/null | \
-        awk '
-        /Ports:/ {
-            sub(/.*Ports: /, "")
-            n = split($0, a, ",")
-            for (i = 1; i <= n; i++) {
-                gsub(/^ +/, "", a[i])
-                split(a[i], b, "/")
-                if (b[2] == "open") {
-                    if (puertos != "") {
-                        puertos = puertos "," b[1]
-                    } else {
-                        puertos = b[1]
-                    }
-                }
-            }
-        }
-        END { print puertos }')
+    nmap_out=$(nmap -T4 -sS --open -n -Pn --min-rate 1000 "${host}" 2>/dev/null)
 
-    if [[ -z "${puertos}" ]]; then
-        echo "[+] No se detectaron puertos abiertos en ${host}."
-    else
-        echo "[+] Puertos abiertos (formato limpio):"
-        echo "puerto ${puertos}"
+    # Parser simple y robusto
+    local puertos_nl
+    puertos_nl=$(echo "${nmap_out}" | grep '^[0-9]' | cut -d'/' -f1)
+
+    if [[ -z "${puertos_nl}" ]]; then
+        echo -e "${C_GRN}[+] No se detectaron puertos abiertos.${C_RST}"
+        return
+    fi
+
+    # --- Salida Formato 1 (Lista) ---
+    echo -e "${C_GRN}[+] Puertos Abiertos (Listado):${C_RST}"
+    echo "puerto"
+    echo "${puertos_nl}"
+    echo
+
+    # --- Salida Formato 2 (CSV) ---
+    local puertos_csv
+    puertos_csv=$(echo "${puertos_nl}" | paste -sd ',' -)
+    echo -e "${C_GRN}[+] Puertos Abiertos (CSV):${C_RST}"
+    echo "puerto ${puertos_csv}"
+    
+    # --- [LÓGICA MOVIDA AQUÍ] ---
+    # Comprueba la bandera global y llama a FASE 3 si es necesario
+    if [[ "${AGGRESSIVE_SCAN}" -eq 1 ]]; then
+        escaneo_nmap_agresivo "${host}" "${puertos_csv}"
     fi
 }
 
-# --- [4] Flujo principal ---
+escaneo_nmap_agresivo() {
+    local host="$1"
+    local port_list="$2"
+
+    if [[ -z "${port_list}" ]]; then
+        return # No hay puertos que escanear
+    fi
+
+    echo
+    echo -e "${C_BLU}[*] FASE 3: Escaneo Agresivo (Versión y Scripts)...${C_RST}"
+    echo -e "    ${C_CYN}nmap -sV -sC -p${port_list} ${host}${C_RST}"
+    echo
+    
+    nmap -sV -sC -Pn -p"${port_list}" "${host}"
+}
+
+# --- [4] Flujo Principal ---
+# --- [MODIFICADO] ---
 main() {
-    echo "===== ZT-TOOL: TTL + Nmap Scanner ====="
+    # Parseo de Opciones
+    while getopts "ha" opt; do
+        case $opt in
+            h) show_help ;;
+            a) AGGRESSIVE_SCAN=1 ;;
+            *) show_help ;;
+        esac
+    done
+    shift $((OPTIND - 1)) # Mueve los argumentos para que $1 sea la IP
+
+    # --- Validaciones ---
     check_deps
-    obtener_ip "$@"
+    check_root
+    show_banner
+
+    # --- Obtener IP ---
+    if [[ $# -eq 0 ]]; then
+        echo -e "${C_RED}[-] No se proporcionó IP objetivo.${C_RST}"
+        show_help
+    fi
+    TARGET_IP="$1"
+    echo -e "${C_YEL}[*] Objetivo: ${TARGET_IP}${C_RST}"
     echo
 
-    detectar_ttl_y_os "${TARGET_IP}" || echo "[!] Continuando sin info de TTL/OS..."
+    # --- Ejecución ---
+    detectar_ttl_y_os "${TARGET_IP}"
     echo
 
-    escaneo_nmap_puertos "${TARGET_IP}"
-    echo "===== Escaneo finalizado ====="
+    # [FIX] Simplemente llama a la función. No captures la salida.
+    escaneo_nmap_rapido "${TARGET_IP}"
+    
+    # [YA NO ES NECESARIO] La lógica agresiva se movió a la función anterior
+    # if [[ "${AGGRESSIVE_SCAN}" -eq 1 ]]; then ...
+
+    echo
+    echo -e "${C_BLU}===============================================${C_RST}"
+    echo -e "   ${C_GRN}Escaneo Finalizado${C_RST}"
+    echo -e "${C_BLU}===============================================${C_RST}"
 }
 
 main "$@"
