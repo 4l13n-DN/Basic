@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-#   TTL & Port Scanner :: by 0xAlienSec (v4)
+#   TTL & Port Scanner :: by 0xAlienSec (v6)
 #
-#   Un scanner rápido de dos fases:
-#   1. Detección de OS (por TTL) y escaneo SYN ultra-rápido.
-#   2. (Opcional) Escaneo profundo (-sV -sC) solo en puertos abiertos.
+#   Scanner interactivo con reporte HTML automático:
+#   1. Detección de OS (TTL) y escaneo SYN ultra-rápido.
+#   2. Pregunta interactiva para escaneo profundo (-sV -sC).
+#   3. Generación de reporte HTML automático (vía xsltproc).
 #
 set -euo pipefail
 
@@ -16,23 +17,19 @@ C_YEL="\e[33m"
 C_BLU="\e[34m"
 C_CYN="\e[36m"
 
-# Variables de flags
-AGGRESSIVE_SCAN=0
 TARGET_IP=""
 
 trap 'echo -e "\n\n${C_YEL}[!] Escaneo interrumpido.${C_RST}"; exit 1' INT
 
 # --- [1] Funciones de Ayuda y Banner ---
 show_help() {
-    echo -e "${C_GRN}Uso:${C_RST} sudo $0 [opciones] <IP_OBJETIVO>"
+    echo -e "${C_GRN}Uso:${C_RST} sudo $0 <IP_OBJETIVO>"
     echo
     echo -e "${C_YEL}Opciones:${C_RST}"
-    echo -e "  ${C_CYN}-a${C_RST}         Activa el 'Escaneo Agresivo' (Versión y Scripts) sobre los puertos encontrados."
     echo -e "  ${C_CYN}-h${C_RST}         Muestra este menú de ayuda."
     echo
     echo -e "${C_YEL}Ejemplo:${C_RST}"
     echo -e "  sudo $0 10.10.10.5"
-    echo -e "  sudo $0 -a 10.10.10.5"
     exit 0
 }
 
@@ -44,10 +41,16 @@ show_banner() {
 }
 
 # --- [2] Funciones de Validación ---
+# --- [MODIFICADA] ---
 check_deps() {
-    for cmd in ping nmap awk grep cut sudo; do
+    # [NUEVO] Se añade 'xsltproc' a la lista
+    for cmd in ping nmap awk grep cut sudo xsltproc; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo -e "${C_RED}[-] Comando requerido no encontrado: $cmd${C_RST}"
+            # [NUEVO] Sugerencia de instalación
+            if [[ "$cmd" == "xsltproc" ]]; then
+                echo -e "${C_YEL}[*] Sugerencia: prueba 'sudo apt install xsltproc' (Debian/Ubuntu) o 'sudo dnf install libxslt' (Fedora)${C_RST}"
+            fi
             exit 1
         fi
     done
@@ -82,7 +85,6 @@ detectar_ttl_y_os() {
     echo -e "${C_GRN}[+] SO Probable: ${os}${C_RST}"
 }
 
-# --- [MODIFICADA] ---
 escaneo_nmap_rapido() {
     local host="$1"
     local nmap_out
@@ -93,7 +95,6 @@ escaneo_nmap_rapido() {
 
     nmap_out=$(nmap -T4 -sS --open -p- -n -Pn --min-rate 3000 "${host}" 2>/dev/null)
 
-    # Parser simple y robusto
     local puertos_nl
     puertos_nl=$(echo "${nmap_out}" | grep '^[0-9]' | cut -d'/' -f1)
 
@@ -102,56 +103,86 @@ escaneo_nmap_rapido() {
         return
     fi
 
-    # --- Salida Formato 1 (Lista) ---
     echo -e "${C_GRN}[+] Puertos Abiertos (Listado):${C_RST}"
     echo "puerto"
     echo "${puertos_nl}"
     echo
 
-    # --- Salida Formato 2 (CSV) ---
     local puertos_csv
     puertos_csv=$(echo "${puertos_nl}" | paste -sd ',' -)
     echo -e "${C_GRN}[+] Puertos Abiertos (CSV):${C_RST}"
     echo "puerto ${puertos_csv}"
+    echo
     
-    # --- [LÓGICA MOVIDA AQUÍ] ---
-    # Comprueba la bandera global y llama a FASE 3 si es necesario
-    if [[ "${AGGRESSIVE_SCAN}" -eq 1 ]]; then
-        escaneo_nmap_agresivo "${host}" "${puertos_csv}"
-    fi
+    local choice
+    echo -e -n "${C_YEL}[?] ¿Deseas buscar la versión de los servicios descubiertos? (s/N): ${C_RST}"
+    read -r choice
+
+    case "${choice,,}" in
+        s|si|y|yes|1)
+            escaneo_nmap_agresivo "${host}" "${puertos_csv}"
+            ;;
+        *)
+            echo -e "${C_YEL}[*] Omitiendo escaneo de versión.${C_RST}"
+            ;;
+    esac
 }
 
+# --- [MODIFICADA] ---
 escaneo_nmap_agresivo() {
     local host="$1"
     local port_list="$2"
 
     if [[ -z "${port_list}" ]]; then
-        return # No hay puertos que escanear
+        return
     fi
 
+    # Definimos los nombres de archivo
+    local output_filename="${host}_version_scan"
+    local xml_input="${output_filename}.xml"
+    local html_output="${output_filename}.html"
+
     echo
-    echo -e "${C_BLU}[*] FASE 3: Escaneo Agresivo (Versión y Scripts)...${C_RST}"
-    echo -e "    ${C_CYN}nmap -sV -sC -p${port_list} ${host}${C_RST}"
+    echo -e "${C_BLU}[*] FASE 3: Escaneo Agresivo (Versión, Scripts, Verbose)...${C_RST}"
+    echo -e "    ${C_CYN}nmap -sV -sC -vvv -Pn -p${port_list} -oA ${output_filename} ${host}${C_RST}"
     echo
     
-    nmap -sV -sC -Pn -p"${port_list}" "${host}"
+    # Ejecuta el escaneo Nmap
+    nmap -sV -sC -vvv -Pn -p"${port_list}" -oA "${output_filename}" "${host}"
+
+    echo
+    echo -e "${C_GRN}[+] ¡Escaneo agresivo completado!${C_RST}"
+    echo -e "${C_GRN}[+] Resultados Nmap guardados en: ${output_filename}.(nmap|xml|gnmap)${C_RST}"
+
+    # --- [NUEVO] FASE 4: Generación de Reporte HTML ---
+    echo
+    echo -e "${C_BLU}[*] FASE 4: Generando reporte HTML desde XML...${C_RST}"
+    
+    # Comprueba si el archivo XML se creó correctamente
+    if [[ -f "${xml_input}" ]]; then
+        echo -e "    ${C_CYN}xsltproc ${xml_input} -o ${html_output}${C_RST}"
+        # Ejecuta la conversión
+        xsltproc "${xml_input}" -o "${html_output}"
+        
+        echo -e "${C_GRN}[+] ¡Reporte HTML generado!${C_RST}"
+        echo -e "${C_GRN}[+] Archivo: ${html_output}${C_RST}"
+    else
+        echo -e "${C_RED}[-] No se encontró el archivo ${xml_input}. No se pudo generar el reporte HTML.${C_RST}"
+    fi
 }
 
 # --- [4] Flujo Principal ---
-# --- [MODIFICADO] ---
 main() {
-    # Parseo de Opciones
-    while getopts "ha" opt; do
+    while getopts "h" opt; do
         case $opt in
             h) show_help ;;
-            a) AGGRESSIVE_SCAN=1 ;;
             *) show_help ;;
         esac
     done
-    shift $((OPTIND - 1)) # Mueve los argumentos para que $1 sea la IP
+    shift $((OPTIND - 1))
 
     # --- Validaciones ---
-    check_deps
+    check_deps # <-- Ahora comprueba xsltproc
     check_root
     show_banner
 
@@ -168,12 +199,8 @@ main() {
     detectar_ttl_y_os "${TARGET_IP}"
     echo
 
-    # [FIX] Simplemente llama a la función. No captures la salida.
     escaneo_nmap_rapido "${TARGET_IP}"
     
-    # [YA NO ES NECESARIO] La lógica agresiva se movió a la función anterior
-    # if [[ "${AGGRESSIVE_SCAN}" -eq 1 ]]; then ...
-
     echo
     echo -e "${C_BLU}===============================================${C_RST}"
     echo -e "   ${C_GRN}Escaneo Finalizado${C_RST}"
