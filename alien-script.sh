@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-#   TTL & Port Scanner :: by 0xAlienSec (v6)
+#   TTL & Port Scanner :: by 0xAlienSec (v8 - Organized)
 #
-#   Scanner interactivo con reporte HTML automático:
-#   1. Detección de OS (TTL) y escaneo SYN ultra-rápido.
-#   2. Pregunta interactiva para escaneo profundo (-sV -sC).
-#   3. Generación de reporte HTML automático (vía xsltproc).
+#   1. Detección de OS (TTL) y escaneo SYN.
+#   2. Escaneo de Servicios y Vulnerabilidades interactivo.
+#   3. Gestión automática de carpeta 'nmap' y limpieza de archivos previos.
+#   4. Reportes HTML automáticos.
 #
 set -euo pipefail
 
@@ -18,6 +18,7 @@ C_BLU="\e[34m"
 C_CYN="\e[36m"
 
 TARGET_IP=""
+OUTPUT_DIR="nmap" # Nombre de la carpeta de salida
 
 trap 'echo -e "\n\n${C_YEL}[!] Escaneo interrumpido.${C_RST}"; exit 1' INT
 
@@ -25,11 +26,6 @@ trap 'echo -e "\n\n${C_YEL}[!] Escaneo interrumpido.${C_RST}"; exit 1' INT
 show_help() {
     echo -e "${C_GRN}Uso:${C_RST} sudo $0 <IP_OBJETIVO>"
     echo
-    echo -e "${C_YEL}Opciones:${C_RST}"
-    echo -e "  ${C_CYN}-h${C_RST}         Muestra este menú de ayuda."
-    echo
-    echo -e "${C_YEL}Ejemplo:${C_RST}"
-    echo -e "  sudo $0 10.10.10.5"
     exit 0
 }
 
@@ -40,17 +36,11 @@ show_banner() {
     echo
 }
 
-# --- [2] Funciones de Validación ---
-# --- [MODIFICADA] ---
+# --- [2] Funciones de Validación y Preparación ---
 check_deps() {
-    # [NUEVO] Se añade 'xsltproc' a la lista
     for cmd in ping nmap awk grep cut sudo xsltproc; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
-            echo -e "${C_RED}[-] Comando requerido no encontrado: $cmd${C_RST}"
-            # [NUEVO] Sugerencia de instalación
-            if [[ "$cmd" == "xsltproc" ]]; then
-                echo -e "${C_YEL}[*] Sugerencia: prueba 'sudo apt install xsltproc' (Debian/Ubuntu) o 'sudo dnf install libxslt' (Fedora)${C_RST}"
-            fi
+            echo -e "${C_RED}[-] Falta comando: $cmd${C_RST}"
             exit 1
         fi
     done
@@ -58,9 +48,29 @@ check_deps() {
 
 check_root() {
     if [[ "${EUID}" -ne 0 ]]; then
-        echo -e "${C_RED}[-] Este script requiere privilegios de root para -sS (SYN Scan).${C_RST}"
-        echo -e "${C_YEL}[*] Por favor, ejecútalo con 'sudo'${C_RST}"
+        echo -e "${C_RED}[-] Se requiere root (sudo).${C_RST}"
         exit 1
+    fi
+}
+
+# [NUEVO] Función para gestionar carpeta y limpieza
+preparar_salida() {
+    local base_name="$1" # Ej: 10.10.10.5_version_scan
+    
+    # 1. Crear carpeta si no existe
+    if [[ ! -d "$OUTPUT_DIR" ]]; then
+        echo -e "${C_YEL}[*] Carpeta '$OUTPUT_DIR' no encontrada. Creándola...${C_RST}"
+        mkdir -p "$OUTPUT_DIR"
+    fi
+
+    # 2. Ruta completa del archivo base
+    local full_path="${OUTPUT_DIR}/${base_name}"
+
+    # 3. Limpiar archivos viejos si existen
+    # Borra .xml, .nmap, .gnmap y .html asociados a ese nombre
+    if ls "${full_path}".* 1> /dev/null 2>&1; then
+        echo -e "${C_YEL}[*] Detectados resultados previos para ${base_name}. Eliminando...${C_RST}"
+        rm -f "${full_path}".*
     fi
 }
 
@@ -73,14 +83,14 @@ detectar_ttl_y_os() {
     ttl=$(ping -c1 -W1 "$host" 2>/dev/null | awk -F'ttl=' '/ttl=/{split($2,a," "); print a[1]; exit}')
 
     if [[ -z "${ttl}" ]]; then
-        echo -e "${C_YEL}[!] Sin respuesta ICMP (Host discovery -Pn será usado por Nmap).${C_RST}"
+        echo -e "${C_YEL}[!] Sin respuesta ICMP.${C_RST}"
         return
     fi
 
     local os="Desconocido"
-    if   (( ttl <= 64 ));  then os="Unix/Linux (TTL: ${ttl})"
+    if    (( ttl <= 64 ));  then os="Unix/Linux (TTL: ${ttl})"
     elif (( ttl <= 128 )); then os="Windows (TTL: ${ttl})"
-    else                       os="Router/Dispositivo (TTL: ${ttl})"
+    else                        os="Router/Dispositivo (TTL: ${ttl})"
     fi
     echo -e "${C_GRN}[+] SO Probable: ${os}${C_RST}"
 }
@@ -90,9 +100,9 @@ escaneo_nmap_rapido() {
     local nmap_out
     
     echo -e "${C_BLU}[*] FASE 2: Escaneo SYN rápido de puertos...${C_RST}"
-    echo -e "    ${C_CYN}nmap -T4 -sS --open -p- -n -Pn --min-rate 3000 ${host}${C_RST}"
-    echo
-
+    # Este escaneo es rápido y no se guarda en disco, solo muestra en pantalla
+    # para identificar qué atacar después.
+    
     nmap_out=$(nmap -T4 -sS --open -p- -n -Pn --min-rate 3000 "${host}" 2>/dev/null)
 
     local puertos_nl
@@ -103,108 +113,112 @@ escaneo_nmap_rapido() {
         return
     fi
 
-    echo -e "${C_GRN}[+] Puertos Abiertos (Listado):${C_RST}"
-    echo "puerto"
-    echo "${puertos_nl}"
-    echo
-
     local puertos_csv
     puertos_csv=$(echo "${puertos_nl}" | paste -sd ',' -)
-    echo -e "${C_GRN}[+] Puertos Abiertos (CSV):${C_RST}"
-    echo "puerto ${puertos_csv}"
+    
+    echo -e "${C_GRN}[+] Puertos encontrados:${C_RST} ${puertos_csv}"
     echo
     
-    local choice
-    echo -e -n "${C_YEL}[?] ¿Deseas buscar la versión de los servicios descubiertos? (s/N): ${C_RST}"
-    read -r choice
+    # --- Flujo Interactivo ---
+    
+    # 1. Escaneo de Servicios
+    local choice_ver
+    echo -e -n "${C_YEL}[?] ¿Escanear versiones (-sV -sC)? (s/N): ${C_RST}"
+    read -r choice_ver
+    if [[ "${choice_ver,,}" =~ ^(s|si|y|yes|1)$ ]]; then
+        escaneo_nmap_agresivo "${host}" "${puertos_csv}"
+    fi
+    echo
 
-    case "${choice,,}" in
-        s|si|y|yes|1)
-            escaneo_nmap_agresivo "${host}" "${puertos_csv}"
-            ;;
-        *)
-            echo -e "${C_YEL}[*] Omitiendo escaneo de versión.${C_RST}"
-            ;;
-    esac
+    # 2. Escaneo de Vulnerabilidades
+    local choice_vuln
+    echo -e -n "${C_YEL}[?] ¿Escanear vulnerabilidades (--script vuln)? (s/N): ${C_RST}"
+    read -r choice_vuln
+    if [[ "${choice_vuln,,}" =~ ^(s|si|y|yes|1)$ ]]; then
+        escaneo_vuln "${host}" "${puertos_csv}"
+    fi
 }
 
-# --- [MODIFICADA] ---
 escaneo_nmap_agresivo() {
     local host="$1"
     local port_list="$2"
 
-    if [[ -z "${port_list}" ]]; then
-        return
-    fi
-
-    # Definimos los nombres de archivo
-    local output_filename="${host}_version_scan"
-    local xml_input="${output_filename}.xml"
-    local html_output="${output_filename}.html"
-
-    echo
-    echo -e "${C_BLU}[*] FASE 3: Escaneo Agresivo (Versión, Scripts, Verbose)...${C_RST}"
-    echo -e "    ${C_CYN}nmap -sV -sC -vvv -Pn -p${port_list} -oA ${output_filename} ${host}${C_RST}"
-    echo
+    # Nombre base del archivo (sin extensión ni carpeta)
+    local base_name="${host}_version_scan"
     
-    # Ejecuta el escaneo Nmap
-    nmap -sV -sC -vvv -Pn -p"${port_list}" -oA "${output_filename}" "${host}"
+    # [MODIFICADO] Prepara carpeta y limpia archivos viejos
+    preparar_salida "${base_name}"
+
+    # Definimos rutas completas incluyendo la carpeta
+    local output_base="${OUTPUT_DIR}/${base_name}"
+    local xml_input="${output_base}.xml"
+    local html_output="${output_base}.html"
 
     echo
-    echo -e "${C_GRN}[+] ¡Escaneo agresivo completado!${C_RST}"
-    echo -e "${C_GRN}[+] Resultados Nmap guardados en: ${output_filename}.(nmap|xml|gnmap)${C_RST}"
-
-    # --- [NUEVO] FASE 4: Generación de Reporte HTML ---
-    echo
-    echo -e "${C_BLU}[*] FASE 4: Generando reporte HTML desde XML...${C_RST}"
+    echo -e "${C_BLU}[*] FASE 3A: Escaneo de Servicios...${C_RST}"
+    # Nota: Usamos ${output_base} con -oA. Nmap añadirá las extensiones automáticamente dentro de la carpeta.
+    echo -e "    ${C_CYN}Guardando en: ${OUTPUT_DIR}/${C_RST}"
     
-    # Comprueba si el archivo XML se creó correctamente
-    if [[ -f "${xml_input}" ]]; then
-        echo -e "    ${C_CYN}xsltproc ${xml_input} -o ${html_output}${C_RST}"
-        # Ejecuta la conversión
-        xsltproc "${xml_input}" -o "${html_output}"
-        
-        echo -e "${C_GRN}[+] ¡Reporte HTML generado!${C_RST}"
-        echo -e "${C_GRN}[+] Archivo: ${html_output}${C_RST}"
+    nmap -sV -sC -vvv -Pn -p"${port_list}" -oA "${output_base}" "${host}"
+
+    generar_html "${xml_input}" "${html_output}"
+}
+
+escaneo_vuln() {
+    local host="$1"
+    local port_list="$2"
+
+    local base_name="${host}_vuln_scan"
+    
+    # [MODIFICADO] Prepara carpeta y limpia archivos viejos
+    preparar_salida "${base_name}"
+
+    local output_base="${OUTPUT_DIR}/${base_name}"
+    local xml_input="${output_base}.xml"
+    local html_output="${output_base}.html"
+
+    echo
+    echo -e "${C_BLU}[*] FASE 3B: Escaneo de Vulnerabilidades...${C_RST}"
+    echo -e "    ${C_CYN}Guardando en: ${OUTPUT_DIR}/${C_RST}"
+    
+    nmap --script vuln -Pn -p"${port_list}" -oA "${output_base}" "${host}"
+
+    generar_html "${xml_input}" "${html_output}"
+}
+
+generar_html() {
+    local xml_in="$1"
+    local html_out="$2"
+
+    echo -e "${C_BLU}[*] Generando reporte HTML...${C_RST}"
+    if [[ -f "${xml_in}" ]]; then
+        xsltproc "${xml_in}" -o "${html_out}" 2>/dev/null
+        echo -e "${C_GRN}[+] Reporte guardado: ${html_out}${C_RST}"
     else
-        echo -e "${C_RED}[-] No se encontró el archivo ${xml_input}. No se pudo generar el reporte HTML.${C_RST}"
+        echo -e "${C_RED}[-] Error: No se encontró ${xml_in}${C_RST}"
     fi
 }
 
 # --- [4] Flujo Principal ---
 main() {
-    while getopts "h" opt; do
-        case $opt in
-            h) show_help ;;
-            *) show_help ;;
-        esac
-    done
-    shift $((OPTIND - 1))
-
-    # --- Validaciones ---
-    check_deps # <-- Ahora comprueba xsltproc
+    check_deps
     check_root
     show_banner
 
-    # --- Obtener IP ---
     if [[ $# -eq 0 ]]; then
-        echo -e "${C_RED}[-] No se proporcionó IP objetivo.${C_RST}"
+        echo -e "${C_RED}[-] Debes indicar la IP.${C_RST}"
         show_help
     fi
     TARGET_IP="$1"
     echo -e "${C_YEL}[*] Objetivo: ${TARGET_IP}${C_RST}"
     echo
 
-    # --- Ejecución ---
     detectar_ttl_y_os "${TARGET_IP}"
     echo
-
     escaneo_nmap_rapido "${TARGET_IP}"
     
     echo
-    echo -e "${C_BLU}===============================================${C_RST}"
-    echo -e "   ${C_GRN}Escaneo Finalizado${C_RST}"
-    echo -e "${C_BLU}===============================================${C_RST}"
+    echo -e "${C_BLU}=== FINALIZADO ===${C_RST}"
 }
 
 main "$@"
