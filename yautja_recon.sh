@@ -22,6 +22,9 @@ OUTPUT_DIR=""          # MACHINE_DIR/nmap
 OPEN_PORTS_CSV=""      # Puertos abiertos detectados (fase rápida)
 LOG_FILE=""            # resultado_<maquina>.txt
 
+# Usuario original que lanzó sudo (o el actual si no hay sudo)
+ORIG_USER="${SUDO_USER:-$USER}"
+
 trap 'echo -e "\n\n${C_YEL}[!] Abortado.${C_RST}"; exit 1' INT
 
 # --- [1] Helpers genéricos ---
@@ -128,6 +131,10 @@ Nombre de la máquina: ${MACHINE_NAME}
 =======================================
 
 EOF
+
+    # Dar propiedad de TODA la carpeta al usuario original y permisos usables
+    chown -R "${ORIG_USER}:${ORIG_USER}" "${MACHINE_DIR}"
+    chmod -R 775 "${MACHINE_DIR}"
 
     echo -e "${C_GRN}[+] Directorio de salida Nmap: ${OUTPUT_DIR}${C_RST}"
     echo -e "${C_GRN}[+] Log de resultados: ${LOG_FILE}${C_RST}"
