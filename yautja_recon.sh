@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
 #   TTL & Web Enum Scanner :: by 0xAlienSec
-#   v2.1 - CTF Turbo Mode + ENUMWEB + LOG + Tips + Droid Vuln
+#   v2.2 - CTF Turbo Mode + ENUMWEB + LOG + Tips + Droid Vuln
 #
 set -euo pipefail
 
-# --- [0] Configuración ---
+# --- [0] Colores & globals ---
 C_RST="\e[0m"
 C_RED="\e[31m"
 C_GRN="\e[32m"
@@ -21,11 +21,10 @@ MACHINE_DIR=""
 OUTPUT_DIR=""          # MACHINE_DIR/nmap
 OPEN_PORTS_CSV=""      # Puertos abiertos detectados (fase rápida)
 LOG_FILE=""            # resultado_<maquina>.txt
-SV_RUN=0               # Flag: se ejecutó -sV/-sC
 
 trap 'echo -e "\n\n${C_YEL}[!] Abortado.${C_RST}"; exit 1' INT
 
-# --- [1] Helpers didácticos ---
+# --- [1] Helpers genéricos ---
 imprimir_explicacion() {
     echo -e "${C_PUR}  [i] CTF TIP:${C_RST} $1"
 }
@@ -36,10 +35,29 @@ imprimir_comando() {
     echo
 }
 
+log() {
+    # Escribe una línea en el LOG_FILE (si está definido)
+    [[ -n "${LOG_FILE}" ]] && echo "$1" >> "${LOG_FILE}"
+}
+
+log_block() {
+    [[ -n "${LOG_FILE}" ]] && printf '%s\n' "$@" >> "${LOG_FILE}"
+}
+
+ask_yes_no() {
+    # ask_yes_no "pregunta" -> 0 si sí, 1 si no
+    local prompt="$1"
+    local ans
+    echo -en "${C_YEL}[?] ${prompt} [s/N]: ${C_RST}"
+    read -r ans
+    [[ "${ans,,}" =~ ^(s|si|y|yes|1)$ ]]
+}
+
 show_banner() {
     clear
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "   ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.1 CTF Droid Edition${C_RST}"
+    echo -e "   ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.2 CTF Droid Edition${C_RST}"
+    echo -e "                 by 0xAlienSec"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo
 }
@@ -47,13 +65,15 @@ show_banner() {
 # --- [2] Validaciones ---
 check_root() {
     if [[ "${EUID}" -ne 0 ]]; then
-        echo -e "${C_RED}[!] Se requiere sudo para escaneos SYN rápidos.${C_RST}"
+        echo -e "${C_RED}[!] Este script debe ejecutarse con sudo o como root.${C_RST}"
+        echo -e "${C_YEL}[>] Ejemplo:${C_RST} sudo $0"
         exit 1
     fi
 }
 
 check_deps() {
-    for cmd in ping nmap awk grep cut sudo xsltproc; do
+    local deps=(ping nmap awk grep cut sudo xsltproc)
+    for cmd in "${deps[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo -e "${C_RED}[-] Falta: $cmd${C_RST}"
             exit 1
@@ -62,7 +82,8 @@ check_deps() {
 }
 
 check_web_deps() {
-    for cmd in whatweb gobuster curl; do
+    local deps=(whatweb gobuster curl)
+    for cmd in "${deps[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo -e "${C_RED}[-] Falta (ENUMWEB): $cmd${C_RST}"
             exit 1
@@ -72,24 +93,21 @@ check_web_deps() {
 
 preparar_salida() {
     local base_name="$1"
-    if [[ ! -d "$OUTPUT_DIR" ]]; then mkdir -p "$OUTPUT_DIR"; fi
+    [[ ! -d "$OUTPUT_DIR" ]] && mkdir -p "$OUTPUT_DIR"
     local full_path="${OUTPUT_DIR}/${base_name}"
-    if ls "${full_path}".* 1> /dev/null 2>&1; then rm -f "${full_path}".*; fi
+    if ls "${full_path}".* 1>/dev/null 2>&1; then
+        rm -f "${full_path}".*
+    fi
 }
 
 # --- [2.1] Menú inicial / Máquina & IP ---
 configurar_maquina() {
     echo -e "${C_BLU}[*] CONFIGURACIÓN INICIAL${C_RST}"
-    echo -e -n "${C_YEL}[?] Nombre de la máquina (sin espacios, ej: mrrobot, vulnversity): ${C_RST}"
+    echo -en "${C_YEL}[?] Nombre de la máquina (sin espacios, ej: mrrobot, vulnversity): ${C_RST}"
     read -r MACHINE_NAME
 
-    if [[ -z "${MACHINE_NAME}" ]]; then
-        echo -e "${C_RED}[!] El nombre no puede estar vacío.${C_RST}"
-        exit 1
-    fi
-
-    if [[ "${MACHINE_NAME}" =~ [[:space:]] ]]; then
-        echo -e "${C_RED}[!] No se permiten espacios en el nombre de la máquina.${C_RST}"
+    if [[ -z "${MACHINE_NAME}" || "${MACHINE_NAME}" =~ [[:space:]] ]]; then
+        echo -e "${C_RED}[!] Nombre inválido (vacío o con espacios).${C_RST}"
         exit 1
     fi
 
@@ -105,13 +123,12 @@ configurar_maquina() {
     OUTPUT_DIR="${MACHINE_DIR}/nmap"
     LOG_FILE="${MACHINE_DIR}/resultado_${MACHINE_NAME}.txt"
 
-    # Inicializar log con timestamp
-    {
-        echo "Nombre de la máquina: ${MACHINE_NAME}"
-        echo "======================================="
-        echo "Fecha/Hora de ejecución: $(date)"
-        echo
-    } > "${LOG_FILE}"
+    # Inicializar log (sin timestamp)
+    cat > "${LOG_FILE}" <<EOF
+Nombre de la máquina: ${MACHINE_NAME}
+=======================================
+
+EOF
 
     echo -e "${C_GRN}[+] Directorio de salida Nmap: ${OUTPUT_DIR}${C_RST}"
     echo -e "${C_GRN}[+] Log de resultados: ${LOG_FILE}${C_RST}"
@@ -119,7 +136,7 @@ configurar_maquina() {
 }
 
 leer_ip_objetivo() {
-    echo -e -n "${C_YEL}[?] Ingresa la IP o dominio a analizar: ${C_RST}"
+    echo -en "${C_YEL}[?] Ingresa la IP o dominio a analizar: ${C_RST}"
     read -r TARGET_IP
 
     if [[ -z "${TARGET_IP}" ]]; then
@@ -130,10 +147,7 @@ leer_ip_objetivo() {
     echo -e "${C_YEL}[TARGET]: ${TARGET_IP}${C_RST}"
     echo
 
-    {
-        echo "IP objetivo: ${TARGET_IP}"
-        echo
-    } >> "${LOG_FILE}"
+    log_block "IP objetivo: ${TARGET_IP}" ""
 }
 
 # --- [3] Fases principales de Nmap ---
@@ -145,7 +159,7 @@ detectar_ttl_y_os() {
 
     if [[ -z "${ttl}" ]]; then
         echo -e "${C_YEL}[!] Host no responde a ping (usando -Pn por defecto).${C_RST}"
-        echo "Detección de OS (TTL): sin respuesta a ping." >> "${LOG_FILE}"
+        log "Detección de OS (TTL): sin respuesta a ping."
         return
     fi
 
@@ -156,10 +170,7 @@ detectar_ttl_y_os() {
     fi
 
     echo -e "${C_GRN}[+] Target: ${os}${C_RST}"
-
-    {
-        echo "Detección de OS (TTL): ${os}"
-    } >> "${LOG_FILE}"
+    log "Detección de OS (TTL): ${os}"
 }
 
 escaneo_nmap_rapido() {
@@ -178,15 +189,12 @@ escaneo_nmap_rapido() {
 
     if [[ -z "${puertos_nl}" ]]; then
         echo -e "${C_RED}[-] 0 puertos abiertos.${C_RST}"
-        echo "Puertos abiertos: ninguno detectado." >> "${LOG_FILE}"
+        log "Puertos abiertos: ninguno detectado."
         return
     fi
 
-    local puertos_csv
-    puertos_csv=$(echo "${puertos_nl}" | paste -sd ',' -)
-    OPEN_PORTS_CSV="${puertos_csv}"
-
-    echo -e "${C_GRN}[+] Puertos descubiertos:${C_RST} ${puertos_csv}"
+    OPEN_PORTS_CSV=$(echo "${puertos_nl}" | paste -sd ',' -)
+    echo -e "${C_GRN}[+] Puertos descubiertos:${C_RST} ${OPEN_PORTS_CSV}"
     echo
 }
 
@@ -206,24 +214,19 @@ escaneo_nmap_agresivo() {
     imprimir_comando "$cmd"
     
     nmap -n -Pn -sV -sC -vv --min-rate 3000 -p"${port_list}" -oA "${output_base}" "${host}"
-    SV_RUN=1
 
     generar_html "${output_base}.xml" "${output_base}.html"
 
-    # Log de puertos con servicio + versión
     if [[ -f "${output_base}.nmap" ]]; then
-        {
-            echo
-            echo "Puertos abiertos:"
-            # Ej: 22/tcp open ssh OpenSSH 7.6p1 Ubuntu
-            awk '/^[0-9]+\/tcp/ {
-                port=$1; state=$2; service=$3;
-                $1=""; $2=""; $3="";
-                sub(/^ +/, "");
-                print port" "service" "$0
-            }' "${output_base}.nmap"
-            echo
-        } >> "${LOG_FILE}"
+        log ""
+        log "Puertos abiertos:"
+        awk '/^[0-9]+\/tcp/ {
+            port=$1; state=$2; service=$3;
+            $1=""; $2=""; $3="";
+            sub(/^ +/, "");
+            print port" "service" "$0
+        }' "${output_base}.nmap" >> "${LOG_FILE}"
+        log ""
     fi
 }
 
@@ -236,10 +239,10 @@ generar_html() {
         imprimir_comando "$cmd"
         xsltproc "${xml_in}" -o "${html_out}" 2>/dev/null
         echo -e "${C_GRN}[OK] HTML Generado: ${html_out}${C_RST}"
-        echo "Reporte HTML generado: ${html_out}" >> "${LOG_FILE}"
+        log "Reporte HTML generado: ${html_out}"
     else
         echo -e "${C_RED}[ERROR] Falló Nmap, no hay XML para generar HTML.${C_RST}"
-        echo "Reporte HTML: NO generado (no se encontró XML)." >> "${LOG_FILE}"
+        log "Reporte HTML: NO generado (no se encontró XML)."
     fi
 }
 
@@ -248,23 +251,31 @@ generar_droide_vuln() {
     local host="$1"
     local port_list="$2"
 
-    if [[ -z "${port_list}" ]]; then
-        return
-    fi
+    [[ -z "${port_list}" ]] && return
 
     local droid_path="${MACHINE_DIR}/droid.sh"
 
     cat > "${droid_path}" <<EOF
 #!/usr/bin/env bash
 #
-# droid.sh - Escáner de vulnerabilidades (Nmap --script vuln) generado por 0xAlienSec
-# Ejecutar en otra terminal: ./droid.sh (dentro de la carpeta de la máquina)
+# droid.sh - Escáner de vulnerabilidades (Nmap --script vuln)
+# Generado automáticamente por 0xAlienSec
+# Ejecutar SIEMPRE con sudo dentro de la carpeta de la máquina:
+#   sudo ./droid.sh
 #
 set -euo pipefail
 
+C_RED="\e[31m"
 C_GRN="\e[32m"
 C_CYN="\e[36m"
+C_YEL="\e[33m"
 C_RST="\e[0m"
+
+if [[ "\${EUID}" -ne 0 ]]; then
+    echo -e "\${C_RED}[!] Este droide debe ejecutarse con sudo o como root.\${C_RST}"
+    echo -e "\${C_YEL}[>] Ejemplo:\${C_RST} sudo ./droid.sh"
+    exit 1
+fi
 
 HOST="${host}"
 PORT_LIST="${port_list}"
@@ -288,15 +299,13 @@ EOF
     chmod +x "${droid_path}"
 
     echo -e "${C_GRN}[+] Droide de vulnerabilidades generado: ${droid_path}${C_RST}"
-    {
-        echo
-        echo "Droide de vulnerabilidades generado: ${droid_path}"
-        echo "Para ejecutarlo: cd ${MACHINE_DIR} && ./droid.sh"
-    } >> "${LOG_FILE}"
+    log ""
+    log "Droide de vulnerabilidades generado: ${droid_path}"
+    log "Para ejecutarlo: cd ${MACHINE_DIR} && sudo ./droid.sh"
 
     echo
-    echo -e "${C_YEL}[VULNS] Para un escaneo más profundo de vulnerabilidades te recomendamos ejecutar el droide:${C_RST}"
-    echo -e "        cd ${MACHINE_DIR} && ./droid.sh"
+    echo -e "${C_YEL}[VULNS] Para un escaneo más profundo de vulnerabilidades ejecuta el droide:${C_RST}"
+    echo -e "        cd ${MACHINE_DIR} && sudo ./droid.sh"
     echo
 }
 
@@ -315,20 +324,17 @@ enum_web_port() {
 
     local base_url="http://${host}:${port}"
 
-    {
-        echo
-        echo "=== ENUMWEB sobre ${host}:${port} ==="
-        echo "Base URL: ${base_url}"
-    } >> "${LOG_FILE}"
+    log ""
+    log "=== ENUMWEB sobre ${host}:${port} ==="
+    log "Base URL: ${base_url}"
 
-    echo ""
+    echo
     echo "============================"
     echo "[1] Escaneo de versión (whatweb)"
     echo "============================"
     local cmd1="whatweb ${base_url}"
     imprimir_comando "$cmd1"
 
-    # Manejo suave por si whatweb falla
     set +e
     whatweb "${base_url}" | tee "${web_dir}/whatweb.txt"
     local ww_status=$?
@@ -336,10 +342,10 @@ enum_web_port() {
 
     if (( ww_status != 0 )); then
         echo -e "${C_RED}[-] Error ejecutando whatweb (exit code ${ww_status}). Revisa la instalación de whatweb.${C_RST}"
-        echo "whatweb: fallo de ejecución (exit code ${ww_status})." >> "${LOG_FILE}"
+        log "whatweb: fallo de ejecución (exit code ${ww_status})."
     fi
 
-    echo ""
+    echo
     echo "============================"
     echo "[2] Enumeración de Directorios (Gobuster)"
     echo "============================"
@@ -349,19 +355,16 @@ enum_web_port() {
     local wordlist=""
     local gobuster_file="${web_dir}/gobuster.txt"
 
-    echo -e -n "${C_YEL}[?] ¿Deseas usar el diccionario por defecto (${default_wordlist})? [s/N]: ${C_RST}"
-    read -r use_default
-
-    if [[ "${use_default,,}" =~ ^(s|si|y|yes|1)$ ]]; then
+    if ask_yes_no "¿Deseas usar el diccionario por defecto (${default_wordlist})?"; then
         wordlist="${default_wordlist}"
     else
-        echo -e -n "${C_YEL}[?] Ruta del diccionario a usar (ej: /usr/share/wordlists/dirb/common.txt): ${C_RST}"
+        echo -en "${C_YEL}[?] Ruta del diccionario a usar (ej: /usr/share/wordlists/dirb/common.txt): ${C_RST}"
         read -r wordlist
     fi
 
     if [[ ! -f "${wordlist}" ]]; then
         echo -e "${C_RED}[-] Archivo inexistente o ruta inválida: ${wordlist}${C_RST}"
-        echo "Fuzzing (Gobuster) en ${host}:${port}: NO ejecutado (wordlist inválida: ${wordlist})." >> "${LOG_FILE}"
+        log "Fuzzing (Gobuster) en ${host}:${port}: NO ejecutado (wordlist inválida: ${wordlist})."
     else
         local cmd2="gobuster dir -u ${base_url} -w ${wordlist} -x txt,php,zip -s 200,204,301,302,307,401,403 -b \"\" -t 80 -k -o ${gobuster_file}"
         imprimir_comando "$cmd2"
@@ -372,17 +375,15 @@ enum_web_port() {
         hits_count=$(grep -E 'Status:' "${gobuster_file}" 2>/dev/null | wc -l || true)
 
         if (( hits_count > 0 )); then
-            {
-                echo "Fuzzing (Gobuster) en ${host}:${port}: ${hits_count} URLs encontradas."
-                echo "URLs principales:"
-                grep -E 'Status:' "${gobuster_file}" 2>/dev/null | head -5
-            } >> "${LOG_FILE}"
+            log "Fuzzing (Gobuster) en ${host}:${port}: ${hits_count} URLs encontradas."
+            log "URLs principales:"
+            grep -E 'Status:' "${gobuster_file}" 2>/dev/null | head -5 >> "${LOG_FILE}"
         else
-            echo "Fuzzing (Gobuster) en ${host}:${port}: sin resultados relevantes." >> "${LOG_FILE}"
+            log "Fuzzing (Gobuster) en ${host}:${port}: sin resultados relevantes."
         fi
     fi
 
-    echo ""
+    echo
     echo "============================"
     echo "[3] Buscando archivos sensibles"
     echo "============================"
@@ -395,26 +396,22 @@ enum_web_port() {
         local status
         status=$(curl -o /dev/null --silent -Iw "%{http_code}" "${url}")
         
-        if [ "${status}" != "404" ]; then
+        if [[ "${status}" != "404" ]]; then
             any_sensitive=1
             echo "[+] Encontrado: ${url} (Status: ${status})" | tee -a "${web_dir}/sensitive_files.txt"
-            echo "Archivo sensible: ${url} (Status: ${status})" >> "${LOG_FILE}"
+            log "Archivo sensible: ${url} (Status: ${status})"
         fi
     done
 
-    if (( any_sensitive == 0 )); then
-        echo "No se identificaron archivos sensibles en ${host}:${port}." >> "${LOG_FILE}"
-    fi
+    (( any_sensitive == 0 )) && log "No se identificaron archivos sensibles en ${host}:${port}."
 
-    echo ""
+    echo
     echo -e "${C_GRN}[+] ENUMWEB completado sobre ${host}:${port}. Revisa: ${web_dir}${C_RST}"
 }
 
 # --- [5] Sugerencias según puertos abiertos ---
 sugerencias_puertos() {
-    if [[ -z "${OPEN_PORTS_CSV}" ]]; then
-        return
-    fi
+    [[ -z "${OPEN_PORTS_CSV}" ]] && return
 
     local has_ssh=0 has_ftp=0 has_http=0 has_smb=0 has_rdp=0 has_mysql=0 has_mssql=0 has_smtp=0 has_redis=0
 
@@ -434,76 +431,74 @@ sugerencias_puertos() {
         esac
     done
 
-    {
-        echo
-        echo "=== Sugerencias de próximos pasos (no obligatorias) ==="
-        echo "DISCLAIMER: Estas sugerencias son orientativas para laboratorio/CTF."
-        echo "No son comandos que deban ejecutarse siempre en un entorno real."
-        echo
+    log ""
+    log "=== Sugerencias de próximos pasos (no obligatorias) ==="
+    log "DISCLAIMER: Estas sugerencias son orientativas para laboratorio/CTF."
+    log "No son comandos que deban ejecutarse siempre en un entorno real."
+    log ""
 
-        if (( has_ssh )); then
-            echo "- Puerto 22 (SSH, típico Linux):"
-            echo "  TIP: Probar conexión directa (ssh usuario@${TARGET_IP}) o usar Hydra para fuerza bruta controlada."
-            echo "       También puedes usar ssh-audit o enum de claves débiles."
-            echo
-        fi
+    if (( has_ssh )); then
+        log "- Puerto 22 (SSH, típico Linux):"
+        log "  TIP: Probar conexión directa (ssh usuario@${TARGET_IP}) o usar Hydra para fuerza bruta controlada."
+        log "       También puedes usar ssh-audit o enum de claves débiles."
+        log ""
+    fi
 
-        if (( has_ftp )); then
-            echo "- Puerto 21 (FTP):"
-            echo "  TIP: Probar acceso anónimo (ftp ${TARGET_IP}), revisar permisos de lectura/escritura."
-            echo "       Usar nmap --script ftp-anon, ftp-brute o Hydra para usuarios/contraseñas."
-            echo
-        fi
+    if (( has_ftp )); then
+        log "- Puerto 21 (FTP):"
+        log "  TIP: Probar acceso anónimo (ftp ${TARGET_IP}), revisar permisos de lectura/escritura."
+        log "       Usar nmap --script ftp-anon, ftp-brute o Hydra para usuarios/contraseñas."
+        log ""
+    fi
 
-        if (( has_http )); then
-            echo "- Puertos HTTP/HTTPS (80,443,8080,8000,8443):"
-            echo "  TIP: Navegar con el navegador o Burp Suite, usar whatweb/wappalyzer para fingerprint,"
-            echo "       aplicar fuzzing de rutas con gobuster/ffuf y buscar paneles de login o backups."
-            echo
-        fi
+    if (( has_http )); then
+        log "- Puertos HTTP/HTTPS (80,443,8080,8000,8443):"
+        log "  TIP: Navegar con el navegador o Burp Suite, usar whatweb/wappalyzer para fingerprint,"
+        log "       aplicar fuzzing de rutas con gobuster/ffuf y buscar paneles de login o backups."
+        log ""
+    fi
 
-        if (( has_smb )); then
-            echo "- Puertos 139/445 (SMB en Linux/Windows):"
-            echo "  TIP: Usar smbclient, enum4linux-ng o crackmapexec/netexec para enumerar shares, usuarios y sesiones."
-            echo "       Revisar permisos débiles en recursos compartidos y probar autenticación con credenciales conocidas."
-            echo
-        fi
+    if (( has_smb )); then
+        log "- Puertos 139/445 (SMB en Linux/Windows):"
+        log "  TIP: Usar smbclient, enum4linux-ng o crackmapexec/netexec para enumerar shares, usuarios y sesiones."
+        log "       Revisar permisos débiles en recursos compartidos y probar autenticación con credenciales conocidas."
+        log ""
+    fi
 
-        if (( has_rdp )); then
-            echo "- Puerto 3389 (RDP, típico Windows):"
-            echo "  TIP: Probar conexión con xfreerdp / rdesktop, revisar si exige NLA."
-            echo "       En escenarios de password spraying, usar Hydra o crowbar con mucho cuidado."
-            echo
-        fi
+    if (( has_rdp )); then
+        log "- Puerto 3389 (RDP, típico Windows):"
+        log "  TIP: Probar conexión con xfreerdp / rdesktop, revisar si exige NLA."
+        log "       En escenarios de password spraying, usar Hydra o crowbar con mucho cuidado."
+        log ""
+    fi
 
-        if (( has_mysql )); then
-            echo "- Puerto 3306 (MySQL):"
-            echo "  TIP: Probar conexión con mysql -h ${TARGET_IP} -u root -p o usuarios comunes."
-            echo "       Usar nmap --script mysql-* para enum de cuentas, bases de datos y configuraciones débiles."
-            echo
-        fi
+    if (( has_mysql )); then
+        log "- Puerto 3306 (MySQL):"
+        log "  TIP: Probar conexión con mysql -h ${TARGET_IP} -u root -p o usuarios comunes."
+        log "       Usar nmap --script mysql-* para enum de cuentas, bases de datos y configuraciones débiles."
+        log ""
+    fi
 
-        if (( has_mssql )); then
-            echo "- Puerto 1433 (MSSQL):"
-            echo "  TIP: Usar impacket-mssqlclient para conectarte con credenciales válidas."
-            echo "       Revisar si existe xp_cmdshell habilitado para ejecución de comandos."
-            echo
-        fi
+    if (( has_mssql )); then
+        log "- Puerto 1433 (MSSQL):"
+        log "  TIP: Usar impacket-mssqlclient para conectarte con credenciales válidas."
+        log "       Revisar si existe xp_cmdshell habilitado para ejecución de comandos."
+        log ""
+    fi
 
-        if (( has_smtp )); then
-            echo "- Puertos 25/587 (SMTP):"
-            echo "  TIP: Hacer VRFY/EXPN (si están habilitados) para enum de usuarios."
-            echo "       Usar smtp-user-enum y revisar banners para identificar software y versión."
-            echo
-        fi
+    if (( has_smtp )); then
+        log "- Puertos 25/587 (SMTP):"
+        log "  TIP: Hacer VRFY/EXPN (si están habilitados) para enum de usuarios."
+        log "       Usar smtp-user-enum y revisar banners para identificar software y versión."
+        log ""
+    fi
 
-        if (( has_redis )); then
-            echo "- Puerto 6379 (Redis):"
-            echo "  TIP: Intentar conexión sin autenticación con redis-cli -h ${TARGET_IP}."
-            echo "       Revisar si es posible escribir claves o abusar de configuraciones por defecto."
-            echo
-        fi
-    } >> "${LOG_FILE}"
+    if (( has_redis )); then
+        log "- Puerto 6379 (Redis):"
+        log "  TIP: Intentar conexión sin autenticación con redis-cli -h ${TARGET_IP}."
+        log "       Revisar si es posible escribir claves o abusar de configuraciones por defecto."
+        log ""
+    fi
 }
 
 # --- [6] Main ---
@@ -518,16 +513,12 @@ main() {
     escaneo_nmap_rapido "${TARGET_IP}"
 
     if [[ -n "${OPEN_PORTS_CSV}" ]]; then
-        echo -e -n "${C_YEL}[?] ¿Escanear versiones (-sV -sC) sobre estos puertos? [s/N]: ${C_RST}"
-        read -r choice_ver
-        if [[ "${choice_ver,,}" =~ ^(s|si|y|yes|1)$ ]]; then
+        if ask_yes_no "¿Escanear versiones (-sV -sC) sobre estos puertos?"; then
             escaneo_nmap_agresivo "${TARGET_IP}" "${OPEN_PORTS_CSV}"
         else
-            {
-                echo
-                echo "Puertos abiertos (sin -sV): ${OPEN_PORTS_CSV}"
-                echo
-            } >> "${LOG_FILE}"
+            log ""
+            log "Puertos abiertos (sin -sV): ${OPEN_PORTS_CSV}"
+            log ""
         fi
         echo
 
@@ -536,20 +527,16 @@ main() {
 
     echo
     echo -e "${C_GRN}[i] Puertos abiertos detectados:${C_RST} ${OPEN_PORTS_CSV:-N/D}"
-    echo -e -n "${C_YEL}[?] ¿Ejecutar ENUMWEB (whatweb + gobuster + archivos sensibles) sobre uno o varios puertos HTTP? [s/N]: ${C_RST}"
-    read -r choice_web
 
-    if [[ "${choice_web,,}" =~ ^(s|si|y|yes|1)$ ]]; then
-        echo -e -n "${C_YEL}[?] Indica el/los puertos HTTP a analizar (ej: 80,8080,8000,8443): ${C_RST}"
+    if ask_yes_no "¿Ejecutar ENUMWEB (whatweb + gobuster + archivos sensibles) sobre uno o varios puertos HTTP?"; then
+        echo -en "${C_YEL}[?] Indica el/los puertos HTTP a analizar (ej: 80,8080,8000,8443): ${C_RST}"
         read -r http_ports_input
 
         http_ports_input="${http_ports_input// /}"
         IFS=',' read -r -a HTTP_PORTS <<< "${http_ports_input}"
 
         for port in "${HTTP_PORTS[@]}"; do
-            if [[ -z "${port}" ]]; then
-                continue
-            fi
+            [[ -z "${port}" ]] && continue
             if [[ ! "${port}" =~ ^[0-9]+$ ]]; then
                 echo -e "${C_RED}[-] Puerto inválido: ${port}${C_RST}"
                 continue
