@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 #   TTL & Web Enum Scanner :: by 0xAlienSec
-#   v2.0 - CTF Turbo Mode + ENUMWEB + LOG + Tips
+#   v2.1 - CTF Turbo Mode + ENUMWEB + LOG + Tips + Droid Vuln
 #
 set -euo pipefail
 
@@ -39,7 +39,7 @@ imprimir_comando() {
 show_banner() {
     clear
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "   ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.0 CTF Edition${C_RST}"
+    echo -e "   ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.1 CTF Droid Edition${C_RST}"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo
 }
@@ -227,31 +227,6 @@ escaneo_nmap_agresivo() {
     fi
 }
 
-escaneo_vuln() {
-    local host="$1"
-    local port_list="$2"
-    local base_name="${host}_vuln_scan"
-    
-    preparar_salida "${base_name}"
-    local output_base="${OUTPUT_DIR}/${base_name}"
-
-    echo
-    echo -e "${C_BLU}[*] FASE 3B: Escaneo de Vulnerabilidades (--script vuln)${C_RST}"
-    
-    imprimir_explicacion "Buscamos CVEs conocidos con --script vuln. Úsalo como insumo, no como verdad absoluta."
-    echo -e "      ${C_CYN}-n${C_RST} : Sin DNS."
-    echo -e "      ${C_CYN}-Pn${C_RST} : Asumir host online."
-    echo -e "      ${C_CYN}--min-rate 3000${C_RST} : Velocidad agresiva."
-    echo
-    
-    local cmd="nmap -n -Pn --min-rate 3000 -vv --script vuln -p${port_list} -oA ${output_base} ${host}"
-    imprimir_comando "$cmd"
-    
-    nmap -n -Pn --min-rate 3000 -vv --script vuln -p"${port_list}" -oA "${output_base}" "${host}"
-
-    generar_html "${output_base}.xml" "${output_base}.html"
-}
-
 generar_html() {
     local xml_in="$1"
     local html_out="$2"
@@ -266,6 +241,60 @@ generar_html() {
         echo -e "${C_RED}[ERROR] Falló Nmap, no hay XML para generar HTML.${C_RST}"
         echo "Reporte HTML: NO generado (no se encontró XML)." >> "${LOG_FILE}"
     fi
+}
+
+# --- [3B] Generar droide para escaneo de vulnerabilidades ---
+generar_droide_vuln() {
+    local host="$1"
+    local port_list="$2"
+
+    if [[ -z "${port_list}" ]]; then
+        return
+    fi
+
+    local droid_path="${MACHINE_DIR}/droid.sh"
+    local base_name="${host}_vuln_scan"
+
+    cat > "${droid_path}" <<EOF
+#!/usr/bin/env bash
+#
+# droid.sh - Escáner de vulnerabilidades (Nmap --script vuln) generado por 0xAlienSec
+# Ejecutar en otra terminal: ./droid.sh
+#
+set -euo pipefail
+
+C_GRN="\e[32m"
+C_CYN="\e[36m"
+C_RST="\e[0m"
+
+echo -e "\${C_CYN}[*] Ejecutando escaneo de vulnerabilidades (Modo CTF Rápido) sobre ${host} (puertos: ${port_list})\${C_RST}"
+
+CMD="nmap -n -Pn --min-rate 3000 -T4 --script vuln --script-timeout 20s -vv -p${port_list} -oA ${OUTPUT_DIR}/${base_name} ${host}"
+echo -e "\${C_GRN}[>] Comando:\${C_RST} \${CMD}"
+\${CMD}
+
+if [[ -f "${OUTPUT_DIR}/${base_name}.xml" ]]; then
+    CMD_HTML="xsltproc ${OUTPUT_DIR}/${base_name}.xml -o ${OUTPUT_DIR}/${base_name}.html"
+    echo -e "\${C_GRN}[>] Generando HTML:\${C_RST} \${CMD_HTML}"
+    \${CMD_HTML}
+fi
+
+echo -e "\${C_GRN}[OK] Escaneo de vulnerabilidades finalizado. Revisa: ${OUTPUT_DIR}/${base_name}.*\${C_RST}"
+EOF
+
+    chmod +x "${droid_path}"
+
+    echo -e "${C_GRN}[+] Droide de vulnerabilidades generado: ${droid_path}${C_RST}"
+    {
+        echo
+        echo "Droide de vulnerabilidades generado: ${droid_path}"
+        echo "Para ejecutarlo: cd ${MACHINE_DIR} && ./droid.sh"
+    } >> "${LOG_FILE}"
+
+    echo
+    echo -e "${C_YEL}[VULNS] Para un escaneo más profundo de vulnerabilidades te recomendamos ejecutar el droide:${C_RST}"
+    echo -e "        cd ${MACHINE_DIR} && ./droid.sh"
+    echo
 }
 
 # --- [4] ENUMWEB por puerto HTTP ---
@@ -374,7 +403,6 @@ sugerencias_puertos() {
         return
     fi
 
-    # Flags para evitar duplicar sugerencias
     local has_ssh=0 has_ftp=0 has_http=0 has_smb=0 has_rdp=0 has_mysql=0 has_mssql=0 has_smtp=0 has_redis=0
 
     IFS=',' read -r -a PORT_ARRAY <<< "${OPEN_PORTS_CSV}"
@@ -476,7 +504,6 @@ main() {
     detectar_ttl_y_os "${TARGET_IP}"
     escaneo_nmap_rapido "${TARGET_IP}"
 
-    # Preguntar por -sV/-sC sobre puertos descubiertos
     if [[ -n "${OPEN_PORTS_CSV}" ]]; then
         echo -e -n "${C_YEL}[?] ¿Escanear versiones (-sV -sC) sobre estos puertos? [s/N]: ${C_RST}"
         read -r choice_ver
@@ -491,12 +518,8 @@ main() {
         fi
         echo
 
-        echo -e -n "${C_YEL}[?] ¿Escaneo de vulnerabilidades (--script vuln) sobre estos puertos? [s/N]: ${C_RST}"
-        read -r choice_vuln
-        if [[ "${choice_vuln,,}" =~ ^(s|si|y|yes|1)$ ]]; then
-            escaneo_vuln "${TARGET_IP}" "${OPEN_PORTS_CSV}"
-        fi
-        echo
+        # Siempre generamos el droide si hay puertos
+        generar_droide_vuln "${TARGET_IP}" "${OPEN_PORTS_CSV}"
     fi
 
     echo
@@ -523,7 +546,6 @@ main() {
         done
     fi
 
-    # Agregar sugerencias al final del log
     sugerencias_puertos
 
     echo
