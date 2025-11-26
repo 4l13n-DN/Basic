@@ -253,13 +253,12 @@ generar_droide_vuln() {
     fi
 
     local droid_path="${MACHINE_DIR}/droid.sh"
-    local base_name="${host}_vuln_scan"
 
     cat > "${droid_path}" <<EOF
 #!/usr/bin/env bash
 #
 # droid.sh - Escáner de vulnerabilidades (Nmap --script vuln) generado por 0xAlienSec
-# Ejecutar en otra terminal: ./droid.sh
+# Ejecutar en otra terminal: ./droid.sh (dentro de la carpeta de la máquina)
 #
 set -euo pipefail
 
@@ -267,19 +266,23 @@ C_GRN="\e[32m"
 C_CYN="\e[36m"
 C_RST="\e[0m"
 
-echo -e "\${C_CYN}[*] Ejecutando escaneo de vulnerabilidades (Modo CTF Rápido) sobre ${host} (puertos: ${port_list})\${C_RST}"
+HOST="${host}"
+PORT_LIST="${port_list}"
+OUTPUT_DIR="nmap"
+BASE_NAME="\${HOST}_vuln_scan"
 
-CMD="nmap -n -Pn --min-rate 3000 -T4 --script vuln --script-timeout 20s -vv -p${port_list} -oA ${OUTPUT_DIR}/${base_name} ${host}"
-echo -e "\${C_GRN}[>] Comando:\${C_RST} \${CMD}"
-\${CMD}
+echo -e "\${C_CYN}[*] Ejecutando escaneo de vulnerabilidades (Modo CTF Rápido) sobre \${HOST} (puertos: \${PORT_LIST})\${C_RST}"
 
-if [[ -f "${OUTPUT_DIR}/${base_name}.xml" ]]; then
-    CMD_HTML="xsltproc ${OUTPUT_DIR}/${base_name}.xml -o ${OUTPUT_DIR}/${base_name}.html"
-    echo -e "\${C_GRN}[>] Generando HTML:\${C_RST} \${CMD_HTML}"
-    \${CMD_HTML}
+echo -e "\${C_GRN}[>] Comando:\${C_RST} nmap -n -Pn --min-rate 3000 -T4 --script vuln --script-timeout 20s -vv -p\${PORT_LIST} -oA \${OUTPUT_DIR}/\${BASE_NAME} \${HOST}"
+
+nmap -n -Pn --min-rate 3000 -T4 --script vuln --script-timeout 20s -vv -p"\${PORT_LIST}" -oA "\${OUTPUT_DIR}/\${BASE_NAME}" "\${HOST}"
+
+if [[ -f "\${OUTPUT_DIR}/\${BASE_NAME}.xml" ]]; then
+    echo -e "\${C_GRN}[>] Generando HTML:\${C_RST} xsltproc \${OUTPUT_DIR}/\${BASE_NAME}.xml -o \${OUTPUT_DIR}/\${BASE_NAME}.html"
+    xsltproc "\${OUTPUT_DIR}/\${BASE_NAME}.xml" -o "\${OUTPUT_DIR}/\${BASE_NAME}.html"
 fi
 
-echo -e "\${C_GRN}[OK] Escaneo de vulnerabilidades finalizado. Revisa: ${OUTPUT_DIR}/${base_name}.*\${C_RST}"
+echo -e "\${C_GRN}[OK] Escaneo de vulnerabilidades finalizado. Revisa: \${OUTPUT_DIR}/\${BASE_NAME}.*\${C_RST}"
 EOF
 
     chmod +x "${droid_path}"
