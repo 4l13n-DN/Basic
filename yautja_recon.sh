@@ -516,3 +516,53 @@ main() {
 
     detectar_ttl_y_os "${TARGET_IP}"
     escaneo_nmap_rapido "${TARGET_IP}"
+
+    if [[ -n "${OPEN_PORTS_CSV}" ]]; then
+        echo -e -n "${C_YEL}[?] ¿Escanear versiones (-sV -sC) sobre estos puertos? [s/N]: ${C_RST}"
+        read -r choice_ver
+        if [[ "${choice_ver,,}" =~ ^(s|si|y|yes|1)$ ]]; then
+            escaneo_nmap_agresivo "${TARGET_IP}" "${OPEN_PORTS_CSV}"
+        else
+            {
+                echo
+                echo "Puertos abiertos (sin -sV): ${OPEN_PORTS_CSV}"
+                echo
+            } >> "${LOG_FILE}"
+        fi
+        echo
+
+        generar_droide_vuln "${TARGET_IP}" "${OPEN_PORTS_CSV}"
+    fi
+
+    echo
+    echo -e "${C_GRN}[i] Puertos abiertos detectados:${C_RST} ${OPEN_PORTS_CSV:-N/D}"
+    echo -e -n "${C_YEL}[?] ¿Ejecutar ENUMWEB (whatweb + gobuster + archivos sensibles) sobre uno o varios puertos HTTP? [s/N]: ${C_RST}"
+    read -r choice_web
+
+    if [[ "${choice_web,,}" =~ ^(s|si|y|yes|1)$ ]]; then
+        echo -e -n "${C_YEL}[?] Indica el/los puertos HTTP a analizar (ej: 80,8080,8000,8443): ${C_RST}"
+        read -r http_ports_input
+
+        http_ports_input="${http_ports_input// /}"
+        IFS=',' read -r -a HTTP_PORTS <<< "${http_ports_input}"
+
+        for port in "${HTTP_PORTS[@]}"; do
+            if [[ -z "${port}" ]]; then
+                continue
+            fi
+            if [[ ! "${port}" =~ ^[0-9]+$ ]]; then
+                echo -e "${C_RED}[-] Puerto inválido: ${port}${C_RST}"
+                continue
+            fi
+            enum_web_port "${TARGET_IP}" "${port}"
+        done
+    fi
+
+    sugerencias_puertos
+
+    echo
+    echo -e "${C_GRN}[i] Log resumido de resultados disponible en: ${LOG_FILE}${C_RST}"
+    echo -e "${C_BLU}=== DONE ===${C_RST}"
+}
+
+main "$@"
