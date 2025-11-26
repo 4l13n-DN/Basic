@@ -36,7 +36,6 @@ imprimir_comando() {
 }
 
 log() {
-    # Escribe una línea en el LOG_FILE (si está definido)
     [[ -n "${LOG_FILE}" ]] && echo "$1" >> "${LOG_FILE}"
 }
 
@@ -377,7 +376,9 @@ enum_web_port() {
         if (( hits_count > 0 )); then
             log "Fuzzing (Gobuster) en ${host}:${port}: ${hits_count} URLs encontradas."
             log "URLs principales:"
-            grep -E 'Status:' "${gobuster_file}" 2>/dev/null | head -5 >> "${LOG_FILE}"
+            # Limpiar códigos de color ANSI antes de guardar al log
+            grep -E 'Status:' "${gobuster_file}" 2>/dev/null | head -5 \
+                | sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' >> "${LOG_FILE}"
         else
             log "Fuzzing (Gobuster) en ${host}:${port}: sin resultados relevantes."
         fi
@@ -546,6 +547,18 @@ main() {
     fi
 
     sugerencias_puertos
+
+    # Preguntar si borramos el droide
+    local droid_path="${MACHINE_DIR}/droid.sh"
+    if [[ -f "${droid_path}" ]]; then
+        if ask_yes_no "¿Deseas eliminar el droide generado (droid.sh) para esta máquina?"; then
+            rm -f "${droid_path}"
+            echo -e "${C_YEL}[i] Droide eliminado: ${droid_path}${C_RST}"
+            log "Droide eliminado por el usuario: ${droid_path}"
+        else
+            log "Droide conservado por el usuario: ${droid_path}"
+        fi
+    fi
 
     echo
     echo -e "${C_GRN}[i] Log resumido de resultados disponible en: ${LOG_FILE}${C_RST}"
