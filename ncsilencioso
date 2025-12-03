@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# Script de Escaneo Silencioso de Puertos (TCP) con Netcat (nc).
+# Lee los puertos a escanear desde el archivo 'top_ports.txt'.
+
+# --- Configuración ---
+PORT_LIST_FILE="top_ports.txt"
+TIMEOUT=1 # Timeout en segundos
+
+# Verificar que Netcat esté instalado
+if ! command -v nc &> /dev/null; then
+    echo "❌ Error: Netcat (nc) no está instalado o no está en el PATH."
+    exit 1
+fi
+
+# Verificar la lista de puertos
+if [ ! -f "$PORT_LIST_FILE" ]; then
+    echo "❌ Error: No se encontró el archivo de lista de puertos '$PORT_LIST_FILE'."
+    echo "Crea este archivo y añade un puerto por línea (ej: 21, 22, 80, 443, 3306, etc.)."
+    exit 1
+fi
+
+echo "--- 🔍 Escaneo Silencioso TCP ($PORT_LIST_FILE) ---"
+echo "Ingrese la IP a escanear (Ej. 192.168.1.1) o la Base de Red (Ej. 192.168.1):"
+read -r INPUT_TARGET
+
+# --- Función de Escaneo de Host Único con Lista ---
+scan_host_list() {
+    local TARGET_IP=$1
+    echo -e "\n[+] Escaneando host: $TARGET_IP"
+    
+    # Bucle que lee cada puerto del archivo
+    while IFS= read -r PORT; do
+        
+        # Saltarse líneas vacías o comentarios
+        if [[ "$PORT" =~ ^#.* ]] || [[ -z "$PORT" ]]; then
+            continue
+        fi
+
+        # El comando de Netcat: -z (zero-I/O), -n (no DNS), -v (verbose), -w (timeout)
+        # Redirigimos stderr (2>&1) y filtramos por 'succeeded'
+        RESULTADO=$(nc -z -n -v -w "$TIMEOUT" "$TARGET_IP" "$PORT" 2>&1 | grep 'succeeded')
+        
+        if [ ! -z "$RESULTADO" ]; then
+            echo -e "    ✅ Puerto ABIERTO: $PORT"
+        fi
+        
+    done < "$PORT_LIST_FILE"
+}
+
+# ----------------------------------------------------------------------
+# --- Lógica de Escaneo Condicional (IP o Red) ---
+DOTS=$(echo "$INPUT_TARGET" | grep -o "\." | wc -l)
+
+if [ "$DOTS" -eq 3 ]; then
+    echo "Modo detectado: Escaneo de Host Único."
+    scan_host_list "$INPUT_TARGET"
+
+elif [ "$DOTS" -eq 2 ]; then
+    echo "Modo detectado: Escaneo de Red $INPUT_TARGET.0/24."
+    
+    # Bucle externo: Itera sobre los hosts (el último octeto de 1 a 254)
+    for i in {1..254}; do
+        TARGET_IP="$INPUT_TARGET.$i"
+        scan_host_list "$TARGET_IP"
+    done
+else
+    echo -e "\n❌ Error: Formato de entrada no válido. Use IP completa (1.1.1.1) o Base de Red (1.1.1)."
+fi
+
+echo -e "\n--- Escaneo completado. ---"
