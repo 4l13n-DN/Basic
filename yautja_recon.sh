@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 #    TTL & Web Enum Scanner :: by 0xAlienSec
-#    v2.4 Hunter Edition
+#    v2.5 Hunter Edition
 #
 set -euo pipefail
 
@@ -21,7 +21,7 @@ MACHINE_NAME=""
 MACHINE_DIR=""
 OUTPUT_DIR=""           # MACHINE_DIR/nmap
 OPEN_PORTS_CSV=""       # Puertos abiertos detectados (fase rápida)
-LOG_FILE=""             # logs_<maquina>.txt (AHORA SE LLAMA LOGS)
+LOG_FILE=""             # logs_<maquina>.txt
 
 # Usuario original que lanzó sudo
 ORIG_USER="${SUDO_USER:-$USER}"
@@ -30,19 +30,16 @@ trap 'echo -e "\n\n${C_YEL}[!] Abortado por el usuario.${C_RST}"; log_info "Proc
 
 # --- [1] Helpers de Logging y Auditoría ---
 
-# log_info: Registra eventos con fecha y hora (Auditoría)
 log_info() {
     local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
     [[ -n "${LOG_FILE}" ]] && echo "[${timestamp}] [INFO] $1" >> "${LOG_FILE}"
 }
 
-# log_cmd: Registra el comando exacto ejecutado (Forense)
 log_cmd() {
     local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
     [[ -n "${LOG_FILE}" ]] && echo "[${timestamp}] [CMD] EJECUTADO: $1" >> "${LOG_FILE}"
 }
 
-# log_data: Guarda datos crudos sin timestamp (Para no romper el reporteador)
 log_data() {
     [[ -n "${LOG_FILE}" ]] && echo "$1" >> "${LOG_FILE}"
 }
@@ -52,7 +49,6 @@ imprimir_comando() {
     echo -e "${C_PUR}  [>] COMANDO EJECUTADO:${C_RST}"
     echo -e "      ${C_CYN}${cmd}${C_RST}"
     echo
-    # Guardamos en el log el comando exacto
     log_cmd "${cmd}"
 }
 
@@ -84,7 +80,7 @@ show_banner() {
     clear
     detectar_mi_ip
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.4 Log Master${C_RST}"
+    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.5 Hunter Edition${C_RST}"
     echo -e "               by 0xAlienSec"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo -e "    ${C_PUR}MI IP (Atacante):${C_RST} ${ATTACKER_IP}"
@@ -137,11 +133,8 @@ configurar_maquina() {
     fi
 
     OUTPUT_DIR="${MACHINE_DIR}/nmap"
-    
-    # --- CAMBIO IMPORTANTE: LOGS_ ---
     LOG_FILE="${MACHINE_DIR}/logs_${MACHINE_NAME}.txt"
 
-    # Encabezado del Log Maestro
     if [[ ! -f "${LOG_FILE}" ]]; then
         cat > "${LOG_FILE}" <<EOF
 =====================================================
@@ -206,8 +199,7 @@ escaneo_nmap_rapido() {
     echo
     echo -e "${C_BLU}[*] FASE 2: Discovery Rápido (SYN)${C_RST}"
     local cmd="nmap -n -Pn -T4 -sS --open -p- --min-rate 4000 ${host}"
-    
-    imprimir_comando "$cmd" # Esto también registra el comando en el log
+    imprimir_comando "$cmd"
 
     local nmap_out
     nmap_out=$(nmap -n -Pn -T4 -sS --open -p- --min-rate 4000 "${host}" 2>/dev/null)
@@ -246,7 +238,6 @@ escaneo_nmap_agresivo() {
         log_info "Fase 3 finalizada. Guardando detalle de puertos."
         log_data ""
         log_data "--- Detalle Puertos (Nmap Output) ---"
-        # Guardamos la salida cruda de nmap
         awk '/^[0-9]+\/tcp/ {print $0}' "${output_base}.nmap" >> "${LOG_FILE}"
     fi
 }
@@ -260,7 +251,7 @@ generar_html() {
     fi
 }
 
-# --- [3B] Generar droide ---
+# --- [3B] Generar droide AUTO-DESTRUCT ---
 generar_droide_vuln() {
     local host="$1"
     local port_list="$2"
@@ -295,7 +286,11 @@ rm -- "\$0"
 EOF
 
     chmod +x "${droid_path}"
+    
+    # --- RECUPERADO: Instrucción explícita de cómo ejecutarlo ---
     echo -e "${C_GRN}[+] Droide generado: ${droid_path}${C_RST}"
+    echo -e "${C_YEL}[VULNS] Ejecutar manual: cd ${MACHINE_DIR} && sudo ./droid.sh${C_RST}"
+    
     log_info "Droide generado en ${droid_path}"
 }
 
@@ -327,8 +322,6 @@ enum_web_port() {
     echo -e "${C_GRN}SÍ.${C_RST}"
 
     mkdir -p "${web_dir}"
-    
-    # Separador visual en el log
     log_data ""
     log_data "=== ENUMWEB ${base_url} ==="
     log_info "Iniciando análisis web en ${base_url}"
@@ -404,7 +397,7 @@ generar_reporte_final() {
 |:-------|:---------|:----------------|
 EOF
 
-    # Extraer Tabla de Puertos (Buscamos datos crudos, ignoramos líneas de [INFO] o [CMD])
+    # Extraer Tabla de Puertos
     if [[ -f "${LOG_FILE}" ]]; then
         grep -E "^[0-9]+/tcp" "${LOG_FILE}" | \
         sed -E 's/syn-ack ttl [0-9]+ //g' | \
@@ -420,7 +413,7 @@ EOF
 ## 2. Enumeración Web (Resumen Automático)
 EOF
 
-    # Extraer Web (Buscamos encabezados y resultados crudos, ignoramos timestamps)
+    # Extraer Web
     if [[ -f "${LOG_FILE}" ]]; then
         grep -E "^=== ENUMWEB|^--- Resultados Gobuster|^/|Sensible encontrado" "${LOG_FILE}" >> "${notas_file}" || echo "Sin actividad web relevante." >> "${notas_file}"
     fi
@@ -429,19 +422,23 @@ EOF
 
 ## 3. Vulnerabilidades Encontradas
 - [ ] CVEs: 
-- [ ] Misconfigurations:
+- [ ] CWL:
+- [ ] Otras:
 
 ## 4. Credenciales
-| Usuario | Password | Hash | Servicio |
-|---------|----------|------|----------|
-|         |          |      |          |
+|      Usuario     |      Password     |     Hash      |     Servicio      |
+|------------------|-------------------|---------------|-------------------|
+|                  |                   |               |                   |
 
 ## 5. Flags
 - [ ] User Flag:
 - [ ] Root Flag:
+- [ ] otra Flag:
+- [ ] otra Flag:
+- [ ] otra Flag:
 
 ---
-*Generado por TTL Scanner v2.4 Log Master*
+*Generado por Yautja by 0xAlienSec*
 EOF
 
     chown "${ORIG_USER}:${ORIG_USER}" "${notas_file}"
