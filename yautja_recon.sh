@@ -272,7 +272,7 @@ if [[ -f "\${OUTPUT_DIR}/\${BASE_NAME}.xml" ]]; then
 fi
 
 echo -e "\${C_GRN}[OK] Escaneo de vulnerabilidades finalizado. Revisa: \${OUTPUT_DIR}/\${BASE_NAME}.*\${C_RST}"
-echo -e "\${C_CYN}[i] Auto-destruyendo este script (droid.sh)...\${C_RST}"
+echo -e "\${C_CYN}[i] Auto-destruyendo este script 5...4...3...2...1..(droid.sh)...\${C_RST}"
 
 rm -- "\$0"
 EOF
@@ -336,15 +336,15 @@ enum_web_port() {
             echo -e "${C_RED}[!] No se encuentra el diccionario ($wordlist). Saltando Gobuster.${C_RST}"
         else
             # 1. Definimos el comando explícito
-            local cmd_gobuster="gobuster dir -u ${base_url} -w ${wordlist} -x txt,php,zip -s 200,204,301,302,307,403 -b '' -t 50 -k --no-error -o ${web_dir}/gobuster.txt"
+            local cmd_gobuster="gobuster dir -u ${base_url} -w ${wordlist} -x txt,php,zip -s 200,204,301,302,307,403 -b '' -t 200 -k --no-error -o ${web_dir}/gobuster.txt"
             
             # 2. Mostramos el comando al alumno
             imprimir_comando "$cmd_gobuster"
-            log "CMD: $cmd_gobuster"
+            #log "CMD: $cmd_gobuster"
             
             # 3. Ejecutamos (la salida se guarda en archivo por el -o)
             gobuster dir -u "${base_url}" -w "${wordlist}" -x txt,php,zip \
-                -s 200,204,301,302,307,403 -b "" -t 50 -k --no-error -o "${web_dir}/gobuster.txt" >/dev/null || true
+                -s 200,204,301,302,307,403 -b "" -t 200 -k --no-error -o "${web_dir}/gobuster.txt" >/dev/null || true
             
             # 4. Extraemos resultados reales para el LOG
             if [[ -f "${web_dir}/gobuster.txt" ]]; then
@@ -399,6 +399,14 @@ sugerencias_puertos() {
     done
 
     log ""
+    log ""
+    log ""    
+    log ""
+    log ""
+    log "" 
+    log ""
+    log ""
+    log "" 
     log "=== Sugerencias de próximos pasos (no obligatorias) ==="
     log "DISCLAIMER: Estas sugerencias son orientativas para laboratorio/CTF."
     log "No son comandos que deban ejecutarse siempre en un entorno real."
