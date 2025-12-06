@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 #    TTL & Web Enum Scanner :: by 0xAlienSec
-#    v2.2 Hunter Edition - Fixed Reporting & Safe Grep
+#    v2.4 Hunter Edition
 #
 set -euo pipefail
 
@@ -21,22 +21,39 @@ MACHINE_NAME=""
 MACHINE_DIR=""
 OUTPUT_DIR=""           # MACHINE_DIR/nmap
 OPEN_PORTS_CSV=""       # Puertos abiertos detectados (fase rápida)
-LOG_FILE=""             # resultado_<maquina>.txt
+LOG_FILE=""             # logs_<maquina>.txt (AHORA SE LLAMA LOGS)
 
 # Usuario original que lanzó sudo
 ORIG_USER="${SUDO_USER:-$USER}"
 
-trap 'echo -e "\n\n${C_YEL}[!] Abortado.${C_RST}"; exit 1' INT
+trap 'echo -e "\n\n${C_YEL}[!] Abortado por el usuario.${C_RST}"; log_info "Proceso abortado por el usuario (Ctrl+C)."; exit 1' INT
 
-# --- [1] Helpers genéricos ---
-imprimir_comando() {
-    echo -e "${C_PUR}  [>] COMANDO EJECUTADO:${C_RST}"
-    echo -e "      ${C_CYN}$1${C_RST}"
-    echo
+# --- [1] Helpers de Logging y Auditoría ---
+
+# log_info: Registra eventos con fecha y hora (Auditoría)
+log_info() {
+    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    [[ -n "${LOG_FILE}" ]] && echo "[${timestamp}] [INFO] $1" >> "${LOG_FILE}"
 }
 
-log() {
+# log_cmd: Registra el comando exacto ejecutado (Forense)
+log_cmd() {
+    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    [[ -n "${LOG_FILE}" ]] && echo "[${timestamp}] [CMD] EJECUTADO: $1" >> "${LOG_FILE}"
+}
+
+# log_data: Guarda datos crudos sin timestamp (Para no romper el reporteador)
+log_data() {
     [[ -n "${LOG_FILE}" ]] && echo "$1" >> "${LOG_FILE}"
+}
+
+imprimir_comando() {
+    local cmd="$1"
+    echo -e "${C_PUR}  [>] COMANDO EJECUTADO:${C_RST}"
+    echo -e "      ${C_CYN}${cmd}${C_RST}"
+    echo
+    # Guardamos en el log el comando exacto
+    log_cmd "${cmd}"
 }
 
 ask_yes_no() {
@@ -67,7 +84,7 @@ show_banner() {
     clear
     detectar_mi_ip
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.2 Hunter Edition${C_RST}"
+    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.4 Log Master${C_RST}"
     echo -e "               by 0xAlienSec"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo -e "    ${C_PUR}MI IP (Atacante):${C_RST} ${ATTACKER_IP}"
@@ -84,7 +101,7 @@ check_root() {
 }
 
 check_deps() {
-    local deps=(ping nmap awk grep cut sudo xsltproc curl)
+    local deps=(ping nmap awk grep cut sudo xsltproc curl sed)
     for cmd in "${deps[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo -e "${C_RED}[-] Falta dependencia vital: $cmd${C_RST}"
@@ -120,15 +137,23 @@ configurar_maquina() {
     fi
 
     OUTPUT_DIR="${MACHINE_DIR}/nmap"
-    LOG_FILE="${MACHINE_DIR}/resultado_${MACHINE_NAME}.txt"
+    
+    # --- CAMBIO IMPORTANTE: LOGS_ ---
+    LOG_FILE="${MACHINE_DIR}/logs_${MACHINE_NAME}.txt"
 
-    # Reiniciar log si ya existe para no duplicar en reintentos
-    cat > "${LOG_FILE}" <<EOF
-Nombre de la máquina: ${MACHINE_NAME}
-IP Atacante (Tu IP): ${ATTACKER_IP}
-=======================================
-
+    # Encabezado del Log Maestro
+    if [[ ! -f "${LOG_FILE}" ]]; then
+        cat > "${LOG_FILE}" <<EOF
+=====================================================
+  BITÁCORA DE AUDITORÍA - 0xAlienSec Scanner
+=====================================================
+Target: ${MACHINE_NAME}
+Fecha Inicio: $(date)
+Usuario: ${ORIG_USER}
+Kernel: $(uname -r)
+=====================================================
 EOF
+    fi
 
     chown -R "${ORIG_USER}:${ORIG_USER}" "${MACHINE_DIR}"
     chmod -R 775 "${MACHINE_DIR}"
@@ -147,14 +172,15 @@ leer_ip_objetivo() {
     if ! ping -c 1 -W 1 "${TARGET_IP}" >/dev/null 2>&1; then
         echo -e "${C_RED}[!] La máquina (${TARGET_IP}) NO responde a ping.${C_RST}"
         echo -e "${C_YEL}[!] REVERSANDO: Revisa tu conexión (VPN/Red) o si la máquina está encendida.${C_RST}"
-        echo -e "${C_CYN}[i] La carpeta ${MACHINE_DIR} se mantiene para reintentos.${C_RST}"
         exit 1
     fi
     
     echo -e "${C_GRN}[+] Conectividad OK.${C_RST}"
     echo -e "${C_YEL}[TARGET]: ${TARGET_IP}${C_RST}"
     echo
-    log "IP Objetivo: ${TARGET_IP}"
+    
+    log_info "Objetivo fijado: ${TARGET_IP}"
+    log_info "IP Atacante: ${ATTACKER_IP}"
 }
 
 # --- [3] Nmap Fases ---
@@ -172,7 +198,7 @@ detectar_ttl_y_os() {
         fi
     }
     echo -e "${C_GRN}[+] Target: ${os}${C_RST}"
-    log "OS (TTL): ${os}"
+    log_info "Detección OS Finalizada. TTL: ${ttl} -> ${os}"
 }
 
 escaneo_nmap_rapido() {
@@ -180,7 +206,8 @@ escaneo_nmap_rapido() {
     echo
     echo -e "${C_BLU}[*] FASE 2: Discovery Rápido (SYN)${C_RST}"
     local cmd="nmap -n -Pn -T4 -sS --open -p- --min-rate 4000 ${host}"
-    imprimir_comando "$cmd"
+    
+    imprimir_comando "$cmd" # Esto también registra el comando en el log
 
     local nmap_out
     nmap_out=$(nmap -n -Pn -T4 -sS --open -p- --min-rate 4000 "${host}" 2>/dev/null)
@@ -189,12 +216,13 @@ escaneo_nmap_rapido() {
 
     if [[ -z "${puertos_nl}" ]]; then
         echo -e "${C_RED}[-] 0 puertos abiertos.${C_RST}"
-        log "Puertos abiertos: 0"
+        log_info "Fase 2 terminada: 0 puertos abiertos."
         return
     fi
 
     OPEN_PORTS_CSV=$(echo "${puertos_nl}" | paste -sd ',' -)
     echo -e "${C_GRN}[+] Puertos descubiertos:${C_RST} ${OPEN_PORTS_CSV}"
+    log_info "Puertos descubiertos: ${OPEN_PORTS_CSV}"
     echo
 }
 
@@ -215,8 +243,10 @@ escaneo_nmap_agresivo() {
     generar_html "${output_base}.xml" "${output_base}.html"
     
     if [[ -f "${output_base}.nmap" ]]; then
-        log ""
-        log "--- Detalle Puertos ---"
+        log_info "Fase 3 finalizada. Guardando detalle de puertos."
+        log_data ""
+        log_data "--- Detalle Puertos (Nmap Output) ---"
+        # Guardamos la salida cruda de nmap
         awk '/^[0-9]+\/tcp/ {print $0}' "${output_base}.nmap" >> "${LOG_FILE}"
     fi
 }
@@ -230,7 +260,7 @@ generar_html() {
     fi
 }
 
-# --- [3B] Generar droide AUTO-DESTRUCT ---
+# --- [3B] Generar droide ---
 generar_droide_vuln() {
     local host="$1"
     local port_list="$2"
@@ -243,10 +273,6 @@ generar_droide_vuln() {
 # Droide de Vulnerabilidades - AutoDestruct Edition
 set -euo pipefail
 
-C_GRN="\e[32m"
-C_CYN="\e[36m"
-C_RST="\e[0m"
-
 if [[ "\${EUID}" -ne 0 ]]; then
     echo "Ejecuta con sudo."
     exit 1
@@ -257,26 +283,23 @@ PORT_LIST="${port_list}"
 OUTPUT_DIR="nmap"
 BASE_NAME="\${HOST}_vuln_scan"
 
-echo -e "\${C_CYN}[*] Ejecutando escaneo vuln sobre \${HOST}...\${C_RST}"
+echo "Ejecutando escaneo vuln sobre \${HOST}..."
 nmap -n -Pn --min-rate 3000 -T4 --script vuln --script-timeout 60s -vv -p"\${PORT_LIST}" -oA "\${OUTPUT_DIR}/\${BASE_NAME}" "\${HOST}"
 
 if [[ -f "\${OUTPUT_DIR}/\${BASE_NAME}.xml" ]]; then
     xsltproc "\${OUTPUT_DIR}/\${BASE_NAME}.xml" -o "\${OUTPUT_DIR}/\${BASE_NAME}.html"
 fi
 
-echo -e "\${C_GRN}[OK] Escaneo de vulnerabilidades finalizado. Revisa: \${OUTPUT_DIR}/\${BASE_NAME}.*\${C_RST}"
-echo -e "\${C_CYN}[i] Auto-destruyendo este script 5...4...3...2...1..(droid.sh)...\${C_RST}"
-
+echo "Auto-destruyendo este script..."
 rm -- "\$0"
 EOF
 
     chmod +x "${droid_path}"
-    echo -e "${C_GRN}[+] Droide generado: ${droid_path} (Se borrará tras ejecutarse)${C_RST}"
-    echo -e "${C_YEL}[VULNS] Ejecutar manual: cd ${MACHINE_DIR} && sudo ./droid.sh${C_RST}"
-    log "Droide generado: ${droid_path}"
+    echo -e "${C_GRN}[+] Droide generado: ${droid_path}${C_RST}"
+    log_info "Droide generado en ${droid_path}"
 }
 
-# --- [4] ENUMWEB + Validaciones ---
+# --- [4] ENUMWEB ---
 validar_puerto_web() {
     local host="$1"
     local port="$2"
@@ -298,15 +321,17 @@ enum_web_port() {
     echo -en "${C_YEL}[?] Validando si el puerto ${port} es HTTP... ${C_RST}"
     if ! validar_puerto_web "${host}" "${port}"; then
         echo -e "${C_RED}NO.${C_RST}"
-        echo -e "${C_YEL}[!] El puerto ${port} no responde a HTTP/HTML. Saltando análisis web.${C_RST}"
-        log "ENUMWEB: Puerto ${port} omitido (no pasó validación HTTP)."
+        log_info "WEB: Puerto ${port} descartado (sin respuesta HTTP)."
         return
     fi
     echo -e "${C_GRN}SÍ.${C_RST}"
 
     mkdir -p "${web_dir}"
-    log ""
-    log "=== ENUMWEB ${base_url} ==="
+    
+    # Separador visual en el log
+    log_data ""
+    log_data "=== ENUMWEB ${base_url} ==="
+    log_info "Iniciando análisis web en ${base_url}"
 
     # --- Whatweb ---
     echo "--- Whatweb ---"
@@ -314,9 +339,9 @@ enum_web_port() {
     
     if command -v whatweb >/dev/null 2>&1; then
         imprimir_comando "$cmd_whatweb"
-        whatweb "${base_url}" | tee "${web_dir}/whatweb.txt" || echo -e "${C_RED}[!] Error al ejecutar whatweb${C_RST}"
+        whatweb "${base_url}" | tee "${web_dir}/whatweb.txt" || echo -e "${C_RED}[!] Error whatweb${C_RST}"
     else
-        echo -e "${C_YEL}[!] 'whatweb' no está instalado. Omitiendo.${C_RST}"
+        log_info "Whatweb no instalado."
     fi
 
     # --- Gobuster ---
@@ -326,7 +351,8 @@ enum_web_port() {
         local wordlist="/usr/share/wordlists/dirb/common.txt"
         
         if [[ ! -f "${wordlist}" ]]; then
-            echo -e "${C_RED}[!] No se encuentra el diccionario ($wordlist). Saltando Gobuster.${C_RST}"
+            echo -e "${C_RED}[!] No se encuentra el diccionario ($wordlist).${C_RST}"
+            log_info "Gobuster saltado: falta diccionario."
         else
             local cmd_gobuster="gobuster dir -u ${base_url} -w ${wordlist} -x txt,php,zip -s 200,204,301,302,307,403 -b '' -t 200 -k --no-error -o ${web_dir}/gobuster.txt"
             imprimir_comando "$cmd_gobuster"
@@ -334,18 +360,15 @@ enum_web_port() {
             gobuster dir -u "${base_url}" -w "${wordlist}" -x txt,php,zip \
                 -s 200,204,301,302,307,403 -b "" -t 200 -k --no-error -o "${web_dir}/gobuster.txt" >/dev/null || true
             
-            # --- CORRECCIÓN AQUÍ: Agregado || true para que el script no muera si grep no encuentra nada ---
             if [[ -f "${web_dir}/gobuster.txt" ]]; then
                 local hits
                 hits=$(grep -c "Status:" "${web_dir}/gobuster.txt" || true)
                 echo -e "${C_GRN}[+] Gobuster finalizado. Hits: ${hits}${C_RST}"
                 
-                log "--- Resultados Gobuster ---"
+                log_data "--- Resultados Gobuster ---"
                 grep "Status:" "${web_dir}/gobuster.txt" >> "${LOG_FILE}" || true
             fi
         fi
-    else
-        echo -e "${C_YEL}[!] 'gobuster' no está instalado. Omitiendo.${C_RST}"
     fi
 
     # --- Archivos Sensibles ---
@@ -357,13 +380,13 @@ enum_web_port() {
         status=$(curl -o /dev/null --silent -Iw "%{http_code}" "${url}" || echo "ERR")
         if [[ "$status" == "200" ]]; then
             echo -e "${C_GRN}[+] Encontrado: ${url}${C_RST}"
-            log "Sensible encontrado: ${url}"
+            log_data "Sensible encontrado: ${url}"
         fi
     done
     echo -e "${C_GRN}[OK] Resultados en: ${web_dir}${C_RST}"
 }
 
-# --- [NUEVO] Generar Reporte Final (Pre-rellenado) ---
+# --- [NUEVO] Generar Reporte Final (Formato Corregido) ---
 generar_reporte_final() {
     local notas_file="${MACHINE_DIR}/notashacking_${MACHINE_NAME}.md"
     
@@ -377,15 +400,29 @@ generar_reporte_final() {
 **Attacker IP (Tu IP):** ${ATTACKER_IP}
 
 ## 1. Reconocimiento de Puertos
-**Puertos Abiertos:** ${OPEN_PORTS_CSV:-Ninguno detectado}
+| Puerto | Servicio | Detalle/Versión |
+|:-------|:---------|:----------------|
+EOF
+
+    # Extraer Tabla de Puertos (Buscamos datos crudos, ignoramos líneas de [INFO] o [CMD])
+    if [[ -f "${LOG_FILE}" ]]; then
+        grep -E "^[0-9]+/tcp" "${LOG_FILE}" | \
+        sed -E 's/syn-ack ttl [0-9]+ //g' | \
+        awk '{
+            port=$1; service=$3;
+            $1=""; $2=""; $3=""; 
+            print "| " port " | " service " | " $0 " |"
+        }' >> "${notas_file}" || echo "| N/D | N/D | No se encontraron detalles |" >> "${notas_file}"
+    fi
+
+    cat >> "${notas_file}" <<EOF
 
 ## 2. Enumeración Web (Resumen Automático)
 EOF
 
+    # Extraer Web (Buscamos encabezados y resultados crudos, ignoramos timestamps)
     if [[ -f "${LOG_FILE}" ]]; then
-        # CORRECCIÓN: Agregado || true
-        grep -E "(=== ENUMWEB|Resultados Gobuster|Sensible encontrado)" "${LOG_FILE}" >> "${notas_file}" || echo "Sin actividad web relevante registrada." >> "${notas_file}"
-        grep "Status:" "${LOG_FILE}" >> "${notas_file}" || true
+        grep -E "^=== ENUMWEB|^--- Resultados Gobuster|^/|Sensible encontrado" "${LOG_FILE}" >> "${notas_file}" || echo "Sin actividad web relevante." >> "${notas_file}"
     fi
 
     cat >> "${notas_file}" <<EOF
@@ -404,7 +441,7 @@ EOF
 - [ ] Root Flag:
 
 ---
-*Generado por TTL Scanner v2.2 Hunter Edition*
+*Generado por TTL Scanner v2.4 Log Master*
 EOF
 
     chown "${ORIG_USER}:${ORIG_USER}" "${notas_file}"
@@ -418,6 +455,8 @@ main() {
     show_banner
     configurar_maquina
     leer_ip_objetivo
+
+    log_info "INICIO DE ESCANEO"
 
     detectar_ttl_y_os "${TARGET_IP}"
     escaneo_nmap_rapido "${TARGET_IP}"
@@ -449,11 +488,13 @@ main() {
         done
     fi
 
-    # GENERAMOS EL REPORTE AL FINAL
+    log_info "FIN DE ESCANEO"
+    
+    # Generar Reporte Final
     generar_reporte_final
 
     echo
-    echo -e "${C_GRN}[i] Log crudo (Evidencia): ${LOG_FILE}${C_RST}"
+    echo -e "${C_GRN}[i] Log de Auditoría (Insumo Completo): ${LOG_FILE}${C_RST}"
     echo -e "${C_BLU}=== 4l13N IS HERE ===${C_RST}"
 }
 
