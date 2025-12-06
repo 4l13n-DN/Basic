@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 #    TTL & Web Enum Scanner :: by 0xAlienSec
-#    v2.0 - Smart Web Check + VPN IP + AutoDestruct Droid + Error Handling
+#    v2.5 - Instructor Edition (Full Logs + Full Tips + Command Echo)
 #
 set -euo pipefail
 
@@ -34,7 +34,7 @@ imprimir_explicacion() {
 }
 
 imprimir_comando() {
-    echo -e "${C_PUR}  [>] COMANDO:${C_RST}"
+    echo -e "${C_PUR}  [>] COMANDO EJECUTADO:${C_RST}"
     echo -e "      ${C_CYN}$1${C_RST}"
     echo
 }
@@ -55,9 +55,8 @@ ask_yes_no() {
     [[ "${ans,,}" =~ ^(s|si|y|yes|1)$ ]]
 }
 
-# --- [1.1] Detección de IP Atacante (MEJORA) ---
+# --- [1.1] Detección de IP Atacante ---
 detectar_mi_ip() {
-    # Prioridad: tun0 (VPN) > eth0 (LAN) > hostname
     local ip=""
     if ip addr show tun0 >/dev/null 2>&1; then
         ip=$(ip -4 addr show tun0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
@@ -76,7 +75,7 @@ show_banner() {
     clear
     detectar_mi_ip
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.4 Hunter Edition${C_RST}"
+    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.5 Instructor Edition${C_RST}"
     echo -e "               by 0xAlienSec"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo -e "    ${C_PUR}MI IP (Atacante):${C_RST} ${ATTACKER_IP}"
@@ -131,7 +130,6 @@ configurar_maquina() {
     OUTPUT_DIR="${MACHINE_DIR}/nmap"
     LOG_FILE="${MACHINE_DIR}/resultado_${MACHINE_NAME}.txt"
 
-    # Inicializar log
     cat > "${LOG_FILE}" <<EOF
 Nombre de la máquina: ${MACHINE_NAME}
 IP Atacante (Tu IP): ${ATTACKER_IP}
@@ -211,9 +209,8 @@ escaneo_nmap_agresivo() {
     local host="$1"
     local port_list="$2"
     local base_name="${host}_version_scan"
-    
     local output_base="${OUTPUT_DIR}/${base_name}"
-    # Limpieza previa solo si existe
+    
     rm -f "${output_base}".* 2>/dev/null
 
     echo
@@ -248,7 +245,6 @@ generar_droide_vuln() {
 
     local droid_path="${MACHINE_DIR}/droid.sh"
 
-    # MEJORA: El script se borra a sí mismo al final (rm -- "$0")
     cat > "${droid_path}" <<EOF
 #!/usr/bin/env bash
 # Droide de Vulnerabilidades - AutoDestruct Edition
@@ -278,7 +274,6 @@ fi
 echo -e "\${C_GRN}[OK] Escaneo de vulnerabilidades finalizado. Revisa: \${OUTPUT_DIR}/\${BASE_NAME}.*\${C_RST}"
 echo -e "\${C_CYN}[i] Auto-destruyendo este script (droid.sh)...\${C_RST}"
 
-# AUTO-DESTRUCCIÓN
 rm -- "\$0"
 EOF
 
@@ -292,13 +287,10 @@ EOF
 validar_puerto_web() {
     local host="$1"
     local port="$2"
-    
-    # Intenta conectar con curl (timeout corto). Si falla, no es web o está cerrado.
-    # Usamos ! para negar el éxito.
     if ! curl -s --head --connect-timeout 3 "http://${host}:${port}" >/dev/null; then
-        return 1 # Falló (No es web o timeout)
+        return 1
     fi
-    return 0 # Éxito (Es web)
+    return 0
 }
 
 enum_web_port() {
@@ -310,7 +302,6 @@ enum_web_port() {
     echo
     echo -e "${C_BLU}[*] FASE 4: ENUMWEB sobre ${host}:${port}${C_RST}"
     
-    # MEJORA: Validación real de servicio HTTP
     echo -en "${C_YEL}[?] Validando si el puerto ${port} es HTTP... ${C_RST}"
     if ! validar_puerto_web "${host}" "${port}"; then
         echo -e "${C_RED}NO.${C_RST}"
@@ -321,44 +312,56 @@ enum_web_port() {
     echo -e "${C_GRN}SÍ.${C_RST}"
 
     mkdir -p "${web_dir}"
+    log ""
     log "=== ENUMWEB ${base_url} ==="
 
-    # --- Whatweb (con control de errores) ---
+    # --- Whatweb ---
     echo "--- Whatweb ---"
+    local cmd_whatweb="whatweb ${base_url}"
+    
     if command -v whatweb >/dev/null 2>&1; then
-        # Usamos || true para que el script no muera si whatweb falla internamente
+        imprimir_comando "$cmd_whatweb"
         whatweb "${base_url}" | tee "${web_dir}/whatweb.txt" || echo -e "${C_RED}[!] Error al ejecutar whatweb${C_RST}"
     else
         echo -e "${C_YEL}[!] 'whatweb' no está instalado. Omitiendo.${C_RST}"
-        log "whatweb: no instalado."
     fi
 
-    # --- Gobuster (con control de errores) ---
+    # --- Gobuster ---
     echo
     echo "--- Gobuster ---"
     if command -v gobuster >/dev/null 2>&1; then
         local wordlist="/usr/share/wordlists/dirb/common.txt"
         
-        # Si no existe common.txt, intenta otro o avisa
         if [[ ! -f "${wordlist}" ]]; then
-            echo -e "${C_YEL}[!] Diccionario default no encontrado ($wordlist). Usando lista pequeña en memoria.${C_RST}"
-            # O simplemente saltar. Aquí asumiremos que si tiene gobuster, tiene wordlists, o preguntamos.
-            # Para simplificar y evitar errores, solo validamos si existe.
-            echo -e "${C_RED}[!] No se encuentra el diccionario. Saltando Gobuster.${C_RST}"
+            echo -e "${C_RED}[!] No se encuentra el diccionario ($wordlist). Saltando Gobuster.${C_RST}"
         else
-            gobuster dir -u "${base_url}" -w "${wordlist}" -x txt,php -t 50 -k --no-error -o "${web_dir}/gobuster.txt" >/dev/null || true
+            # 1. Definimos el comando explícito
+            local cmd_gobuster="gobuster dir -u ${base_url} -w ${wordlist} -x txt,php,zip -s 200,204,301,302,307,403 -b '' -t 50 -k --no-error -o ${web_dir}/gobuster.txt"
             
-            local hits
-            hits=$(grep -c "Status: 200" "${web_dir}/gobuster.txt" || true)
-            echo -e "${C_GRN}[+] Gobuster finalizado. Hits (200 OK): ${hits}${C_RST}"
-            log "Gobuster: ${hits} resultados 200 OK."
+            # 2. Mostramos el comando al alumno
+            imprimir_comando "$cmd_gobuster"
+            log "CMD: $cmd_gobuster"
+            
+            # 3. Ejecutamos (la salida se guarda en archivo por el -o)
+            gobuster dir -u "${base_url}" -w "${wordlist}" -x txt,php,zip \
+                -s 200,204,301,302,307,403 -b "" -t 50 -k --no-error -o "${web_dir}/gobuster.txt" >/dev/null || true
+            
+            # 4. Extraemos resultados reales para el LOG
+            if [[ -f "${web_dir}/gobuster.txt" ]]; then
+                local hits
+                hits=$(grep -c "Status:" "${web_dir}/gobuster.txt" || true)
+                echo -e "${C_GRN}[+] Gobuster finalizado. Hits: ${hits}${C_RST}"
+                
+                log "--- Resultados Gobuster ---"
+                # Copia las líneas interesantes al log principal
+                grep "Status:" "${web_dir}/gobuster.txt" >> "${LOG_FILE}"
+            fi
         fi
     else
         echo -e "${C_YEL}[!] 'gobuster' no está instalado. Omitiendo.${C_RST}"
-        log "gobuster: no instalado."
     fi
 
-    # --- Archivos Sensibles (Curl siempre está) ---
+    # --- Archivos Sensibles ---
     echo "--- Archivos Sensibles ---"
     local SENSITIVE=("robots.txt" "sitemap.xml")
     for file in "${SENSITIVE[@]}"; do
@@ -367,28 +370,111 @@ enum_web_port() {
         status=$(curl -o /dev/null --silent -Iw "%{http_code}" "${url}" || echo "ERR")
         if [[ "$status" == "200" ]]; then
             echo -e "${C_GRN}[+] Encontrado: ${url}${C_RST}"
-            log "Sensible: ${url}"
+            log "Sensible encontrado: ${url}"
         fi
     done
     echo -e "${C_GRN}[OK] Resultados en: ${web_dir}${C_RST}"
 }
 
+# --- [5] Sugerencias Restauradas ---
 sugerencias_puertos() {
     [[ -z "${OPEN_PORTS_CSV}" ]] && return
+
+    # Parsear puertos a flags
+    local has_ssh=0 has_ftp=0 has_http=0 has_smb=0 has_rdp=0 has_mysql=0 has_mssql=0 has_smtp=0 has_redis=0
+    IFS=',' read -r -a PORT_ARRAY <<< "${OPEN_PORTS_CSV}"
+
+    for p in "${PORT_ARRAY[@]}"; do
+        case "${p}" in
+            22)    has_ssh=1 ;;
+            21)    has_ftp=1 ;;
+            80|443|8080|8000|8443) has_http=1 ;;
+            139|445) has_smb=1 ;;
+            3389) has_rdp=1 ;;
+            3306) has_mysql=1 ;;
+            1433) has_mssql=1 ;;
+            25|587) has_smtp=1 ;;
+            6379) has_redis=1 ;;
+        esac
+    done
+
     log ""
-    log "--- Tips Post-Escaneo ---"
-    # (Lógica simplificada para brevedad, expandir según necesidad)
-    if [[ "$OPEN_PORTS_CSV" == *"22"* ]]; then log "SSH (22): Probar credenciales o keys."; fi
-    if [[ "$OPEN_PORTS_CSV" == *"445"* ]]; then log "SMB (445): Probar null session / enum4linux."; fi
+    log "=== Sugerencias de próximos pasos (no obligatorias) ==="
+    log "DISCLAIMER: Estas sugerencias son orientativas para laboratorio/CTF."
+    log "No son comandos que deban ejecutarse siempre en un entorno real."
+    log ""
+
+    if (( has_ssh )); then
+        log "- Puerto 22 (SSH, típico Linux):"
+        log "  TIP: Probar conexión directa (ssh usuario@${TARGET_IP}) o usar Hydra para fuerza bruta controlada."
+        log "        También puedes usar ssh-audit o enum de claves débiles."
+        log ""
+    fi
+
+    if (( has_ftp )); then
+        log "- Puerto 21 (FTP):"
+        log "  TIP: Probar acceso anónimo (ftp ${TARGET_IP}), revisar permisos de lectura/escritura."
+        log "        Usar nmap --script ftp-anon, ftp-brute o Hydra para usuarios/contraseñas."
+        log ""
+    fi
+
+    if (( has_http )); then
+        log "- Puertos HTTP/HTTPS (80,443,8080,8000,8443):"
+        log "  TIP: Navegar con el navegador o Burp Suite, usar whatweb/wappalyzer para fingerprint,"
+        log "        aplicar fuzzing de rutas con gobuster/ffuf y buscar paneles de login o backups."
+        log ""
+    fi
+
+    if (( has_smb )); then
+        log "- Puertos 139/445 (SMB en Linux/Windows):"
+        log "  TIP: Usar smbclient, enum4linux-ng o crackmapexec/netexec para enumerar shares, usuarios y sesiones."
+        log "        Revisar permisos débiles en recursos compartidos y probar autenticación con credenciales conocidas."
+        log ""
+    fi
+
+    if (( has_rdp )); then
+        log "- Puerto 3389 (RDP, típico Windows):"
+        log "  TIP: Probar conexión con xfreerdp / rdesktop, revisar si exige NLA."
+        log "        En escenarios de password spraying, usar Hydra o crowbar con mucho cuidado."
+        log ""
+    fi
+
+    if (( has_mysql )); then
+        log "- Puerto 3306 (MySQL):"
+        log "  TIP: Probar conexión con mysql -h ${TARGET_IP} -u root -p o usuarios comunes."
+        log "        Usar nmap --script mysql-* para enum de cuentas, bases de datos y configuraciones débiles."
+        log ""
+    fi
+
+    if (( has_mssql )); then
+        log "- Puerto 1433 (MSSQL):"
+        log "  TIP: Usar impacket-mssqlclient para conectarte con credenciales válidas."
+        log "        Revisar si existe xp_cmdshell habilitado para ejecución de comandos."
+        log ""
+    fi
+
+    if (( has_smtp )); then
+        log "- Puertos 25/587 (SMTP):"
+        log "  TIP: Hacer VRFY/EXPN (si están habilitados) para enum de usuarios."
+        log "        Usar smtp-user-enum y revisar banners para identificar software y versión."
+        log ""
+    fi
+
+    if (( has_redis )); then
+        log "- Puerto 6379 (Redis):"
+        log "  TIP: Intentar conexión sin autenticación con redis-cli -h ${TARGET_IP}."
+        log "        Revisar si es posible escribir claves o abusar de configuraciones por defecto."
+        log ""
+    fi
 }
 
 # --- [6] Main ---
 main() {
     check_deps
     check_root
-    show_banner         # Muestra tu IP (tun0/eth0)
+    show_banner
     configurar_maquina
-    leer_ip_objetivo    # Valida ping, si falla, aborta y avisa reversa
+    leer_ip_objetivo
 
     detectar_ttl_y_os "${TARGET_IP}"
     escaneo_nmap_rapido "${TARGET_IP}"
@@ -407,21 +493,15 @@ main() {
         echo -en "${C_YEL}[?] Puertos (ej: 80,8080): ${C_RST}"
         read -r http_ports_input
         
-        # Eliminar espacios y convertir a array
         http_ports_input="${http_ports_input// /}"
         IFS=',' read -r -a HTTP_PORTS <<< "${http_ports_input}"
 
         for port in "${HTTP_PORTS[@]}"; do
             [[ -z "${port}" ]] && continue
-            
-            # Validación simple de formato numérico
             if [[ ! "${port}" =~ ^[0-9]+$ ]]; then
                 echo -e "${C_RED}[!] ${port} no es un número de puerto válido.${C_RST}"
                 continue
             fi
-            
-            # La función enum_web_port ahora contiene la validación HTTP (curl)
-            # y el manejo de errores de herramientas faltantes.
             enum_web_port "${TARGET_IP}" "${port}"
         done
     fi
