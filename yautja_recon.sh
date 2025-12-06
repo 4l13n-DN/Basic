@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 #    TTL & Web Enum Scanner :: by 0xAlienSec
-#    v2.1 Hunter Edition - Auto Reporting
+#    v2.2 Hunter Edition - Fixed Reporting & Safe Grep
 #
 set -euo pipefail
 
@@ -67,7 +67,7 @@ show_banner() {
     clear
     detectar_mi_ip
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.1 Hunter Edition${C_RST}"
+    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.2 Hunter Edition${C_RST}"
     echo -e "               by 0xAlienSec"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo -e "    ${C_PUR}MI IP (Atacante):${C_RST} ${ATTACKER_IP}"
@@ -328,24 +328,20 @@ enum_web_port() {
         if [[ ! -f "${wordlist}" ]]; then
             echo -e "${C_RED}[!] No se encuentra el diccionario ($wordlist). Saltando Gobuster.${C_RST}"
         else
-            # 1. Comando explícito
             local cmd_gobuster="gobuster dir -u ${base_url} -w ${wordlist} -x txt,php,zip -s 200,204,301,302,307,403 -b '' -t 200 -k --no-error -o ${web_dir}/gobuster.txt"
-            
-            # 2. Mostrar comando
             imprimir_comando "$cmd_gobuster"
             
-            # 3. Ejecutar
             gobuster dir -u "${base_url}" -w "${wordlist}" -x txt,php,zip \
                 -s 200,204,301,302,307,403 -b "" -t 200 -k --no-error -o "${web_dir}/gobuster.txt" >/dev/null || true
             
-            # 4. Resultados al LOG
+            # --- CORRECCIÓN AQUÍ: Agregado || true para que el script no muera si grep no encuentra nada ---
             if [[ -f "${web_dir}/gobuster.txt" ]]; then
                 local hits
                 hits=$(grep -c "Status:" "${web_dir}/gobuster.txt" || true)
                 echo -e "${C_GRN}[+] Gobuster finalizado. Hits: ${hits}${C_RST}"
                 
                 log "--- Resultados Gobuster ---"
-                grep "Status:" "${web_dir}/gobuster.txt" >> "${LOG_FILE}"
+                grep "Status:" "${web_dir}/gobuster.txt" >> "${LOG_FILE}" || true
             fi
         fi
     else
@@ -374,7 +370,6 @@ generar_reporte_final() {
     echo
     echo -e "${C_CYN}[*] Generando reporte de trabajo: ${notas_file}...${C_RST}"
 
-    # Escribimos cabecera y datos recopilados
     cat > "${notas_file}" <<EOF
 # 📝 Notas de Hacking: ${MACHINE_NAME}
 **Fecha:** $(date)
@@ -387,16 +382,12 @@ generar_reporte_final() {
 ## 2. Enumeración Web (Resumen Automático)
 EOF
 
-    # Extraer info web del LOG para no pedirla de nuevo
     if [[ -f "${LOG_FILE}" ]]; then
-        # Buscamos líneas que indiquen inicio de Enum, Gobuster o archivos sensibles
+        # CORRECCIÓN: Agregado || true
         grep -E "(=== ENUMWEB|Resultados Gobuster|Sensible encontrado)" "${LOG_FILE}" >> "${notas_file}" || echo "Sin actividad web relevante registrada." >> "${notas_file}"
-        
-        # También intentamos copiar las líneas de Gobuster (Status:) que ya guardamos en el log
         grep "Status:" "${LOG_FILE}" >> "${notas_file}" || true
     fi
 
-    # Completar con la plantilla vacía para el alumno
     cat >> "${notas_file}" <<EOF
 
 ## 3. Vulnerabilidades Encontradas
@@ -413,10 +404,9 @@ EOF
 - [ ] Root Flag:
 
 ---
-*Generado por TTL Scanner v2.1 Hunter Edition*
+*Generado por TTL Scanner v2.2 Hunter Edition*
 EOF
 
-    # Asegurar permisos
     chown "${ORIG_USER}:${ORIG_USER}" "${notas_file}"
     echo -e "${C_GRN}[+] Reporte listo y pre-rellenado: ${notas_file}${C_RST}"
 }
@@ -459,7 +449,7 @@ main() {
         done
     fi
 
-    # GENERAMOS EL REPORTE AL FINAL (Con todos los datos ya recolectados)
+    # GENERAMOS EL REPORTE AL FINAL
     generar_reporte_final
 
     echo
