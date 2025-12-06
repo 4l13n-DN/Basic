@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 #    TTL & Web Enum Scanner :: by 0xAlienSec
-#    v2.0 Hunter Edition
+#    v2.1 Hunter Edition - Auto Reporting
 #
 set -euo pipefail
 
@@ -29,10 +29,6 @@ ORIG_USER="${SUDO_USER:-$USER}"
 trap 'echo -e "\n\n${C_YEL}[!] Abortado.${C_RST}"; exit 1' INT
 
 # --- [1] Helpers genéricos ---
-imprimir_explicacion() {
-    echo -e "${C_PUR}  [i] CTF TIP:${C_RST} $1"
-}
-
 imprimir_comando() {
     echo -e "${C_PUR}  [>] COMANDO EJECUTADO:${C_RST}"
     echo -e "      ${C_CYN}$1${C_RST}"
@@ -41,10 +37,6 @@ imprimir_comando() {
 
 log() {
     [[ -n "${LOG_FILE}" ]] && echo "$1" >> "${LOG_FILE}"
-}
-
-log_block() {
-    [[ -n "${LOG_FILE}" ]] && printf '%s\n' "$@" >> "${LOG_FILE}"
 }
 
 ask_yes_no() {
@@ -75,7 +67,7 @@ show_banner() {
     clear
     detectar_mi_ip
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.0 Hunter Edition${C_RST}"
+    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.1 Hunter Edition${C_RST}"
     echo -e "               by 0xAlienSec"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo -e "    ${C_PUR}MI IP (Atacante):${C_RST} ${ATTACKER_IP}"
@@ -130,6 +122,7 @@ configurar_maquina() {
     OUTPUT_DIR="${MACHINE_DIR}/nmap"
     LOG_FILE="${MACHINE_DIR}/resultado_${MACHINE_NAME}.txt"
 
+    # Reiniciar log si ya existe para no duplicar en reintentos
     cat > "${LOG_FILE}" <<EOF
 Nombre de la máquina: ${MACHINE_NAME}
 IP Atacante (Tu IP): ${ATTACKER_IP}
@@ -139,48 +132,6 @@ EOF
 
     chown -R "${ORIG_USER}:${ORIG_USER}" "${MACHINE_DIR}"
     chmod -R 775 "${MACHINE_DIR}"
-}
-
-# --- [NUEVO] Generar Plantilla de Notas ---
-generar_plantilla_notas() {
-    local notas_file="${MACHINE_DIR}/notas_hacking.md"
-    
-    if [[ ! -f "${notas_file}" ]]; then
-        cat > "${notas_file}" <<EOF
-# Notas de Hacking: ${MACHINE_NAME}
-Target IP: ${TARGET_IP}
-Fecha: $(date)
-
-## 1. Reconocimiento
-- [ ] Puertos Abiertos: 
-- [ ] OS Detectado: 
-
-## 2. Enumeración
-### Web
-- Tecnologías:
-- Directorios Interesantes:
-
-### Otros Servicios (SMB, SSH, FTP)
-- Usuarios encontrados:
-- Recursos compartidos:
-
-## 3. Vulnerabilidades Potenciales
-- CVEs:
-- Misconfigurations:
-
-## 4. Credenciales
-| Usuario | Password | Hash | Servicio |
-|---------|----------|------|----------|
-|         |          |      |          |
-
-## 5. Flags
-[ ] User Flag:
-[ ] Root Flag:
-EOF
-        # Asegurar permisos para el alumno
-        chown "${ORIG_USER}:${ORIG_USER}" "${notas_file}"
-        echo -e "${C_GRN}[+] Plantilla de notas creada: ${notas_file}${C_RST}"
-    fi
 }
 
 leer_ip_objetivo() {
@@ -377,25 +328,23 @@ enum_web_port() {
         if [[ ! -f "${wordlist}" ]]; then
             echo -e "${C_RED}[!] No se encuentra el diccionario ($wordlist). Saltando Gobuster.${C_RST}"
         else
-            # 1. Definimos el comando explícito
+            # 1. Comando explícito
             local cmd_gobuster="gobuster dir -u ${base_url} -w ${wordlist} -x txt,php,zip -s 200,204,301,302,307,403 -b '' -t 200 -k --no-error -o ${web_dir}/gobuster.txt"
             
-            # 2. Mostramos el comando al alumno
+            # 2. Mostrar comando
             imprimir_comando "$cmd_gobuster"
-            #log "CMD: $cmd_gobuster"
             
-            # 3. Ejecutamos (la salida se guarda en archivo por el -o)
+            # 3. Ejecutar
             gobuster dir -u "${base_url}" -w "${wordlist}" -x txt,php,zip \
                 -s 200,204,301,302,307,403 -b "" -t 200 -k --no-error -o "${web_dir}/gobuster.txt" >/dev/null || true
             
-            # 4. Extraemos resultados reales para el LOG
+            # 4. Resultados al LOG
             if [[ -f "${web_dir}/gobuster.txt" ]]; then
                 local hits
                 hits=$(grep -c "Status:" "${web_dir}/gobuster.txt" || true)
                 echo -e "${C_GRN}[+] Gobuster finalizado. Hits: ${hits}${C_RST}"
                 
                 log "--- Resultados Gobuster ---"
-                # Copia las líneas interesantes al log principal
                 grep "Status:" "${web_dir}/gobuster.txt" >> "${LOG_FILE}"
             fi
         fi
@@ -418,6 +367,60 @@ enum_web_port() {
     echo -e "${C_GRN}[OK] Resultados en: ${web_dir}${C_RST}"
 }
 
+# --- [NUEVO] Generar Reporte Final (Pre-rellenado) ---
+generar_reporte_final() {
+    local notas_file="${MACHINE_DIR}/notashacking_${MACHINE_NAME}.md"
+    
+    echo
+    echo -e "${C_CYN}[*] Generando reporte de trabajo: ${notas_file}...${C_RST}"
+
+    # Escribimos cabecera y datos recopilados
+    cat > "${notas_file}" <<EOF
+# 📝 Notas de Hacking: ${MACHINE_NAME}
+**Fecha:** $(date)
+**Target IP:** ${TARGET_IP}
+**Attacker IP (Tu IP):** ${ATTACKER_IP}
+
+## 1. Reconocimiento de Puertos
+**Puertos Abiertos:** ${OPEN_PORTS_CSV:-Ninguno detectado}
+
+## 2. Enumeración Web (Resumen Automático)
+EOF
+
+    # Extraer info web del LOG para no pedirla de nuevo
+    if [[ -f "${LOG_FILE}" ]]; then
+        # Buscamos líneas que indiquen inicio de Enum, Gobuster o archivos sensibles
+        grep -E "(=== ENUMWEB|Resultados Gobuster|Sensible encontrado)" "${LOG_FILE}" >> "${notas_file}" || echo "Sin actividad web relevante registrada." >> "${notas_file}"
+        
+        # También intentamos copiar las líneas de Gobuster (Status:) que ya guardamos en el log
+        grep "Status:" "${LOG_FILE}" >> "${notas_file}" || true
+    fi
+
+    # Completar con la plantilla vacía para el alumno
+    cat >> "${notas_file}" <<EOF
+
+## 3. Vulnerabilidades Encontradas
+- [ ] CVEs: 
+- [ ] Misconfigurations:
+
+## 4. Credenciales
+| Usuario | Password | Hash | Servicio |
+|---------|----------|------|----------|
+|         |          |      |          |
+
+## 5. Flags
+- [ ] User Flag:
+- [ ] Root Flag:
+
+---
+*Generado por TTL Scanner v2.1 Hunter Edition*
+EOF
+
+    # Asegurar permisos
+    chown "${ORIG_USER}:${ORIG_USER}" "${notas_file}"
+    echo -e "${C_GRN}[+] Reporte listo y pre-rellenado: ${notas_file}${C_RST}"
+}
+
 # --- [6] Main ---
 main() {
     check_deps
@@ -425,9 +428,6 @@ main() {
     show_banner
     configurar_maquina
     leer_ip_objetivo
-
-    # Aquí generamos la plantilla vacía para que el alumno empiece a documentar
-    generar_plantilla_notas
 
     detectar_ttl_y_os "${TARGET_IP}"
     escaneo_nmap_rapido "${TARGET_IP}"
@@ -459,8 +459,11 @@ main() {
         done
     fi
 
+    # GENERAMOS EL REPORTE AL FINAL (Con todos los datos ya recolectados)
+    generar_reporte_final
+
     echo
-    echo -e "${C_GRN}[i] Log final: ${LOG_FILE}${C_RST}"
+    echo -e "${C_GRN}[i] Log crudo (Evidencia): ${LOG_FILE}${C_RST}"
     echo -e "${C_BLU}=== 4l13N IS HERE ===${C_RST}"
 }
 
