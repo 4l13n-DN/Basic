@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-#   TTL & Web Enum Scanner :: by 0xAlienSec
-#   v2.2 - CTF Turbo Mode + ENUMWEB + LOG + Tips + Droid Vuln
+#    TTL & Web Enum Scanner :: by 0xAlienSec
+#    v2.3 - CTF Turbo Mode + ENUMWEB + LOG + Tips + Droid Vuln + User Checks
 #
 set -euo pipefail
 
@@ -18,9 +18,9 @@ C_BOLD="\e[1m"
 TARGET_IP=""
 MACHINE_NAME=""
 MACHINE_DIR=""
-OUTPUT_DIR=""          # MACHINE_DIR/nmap
-OPEN_PORTS_CSV=""      # Puertos abiertos detectados (fase rápida)
-LOG_FILE=""            # resultado_<maquina>.txt
+OUTPUT_DIR=""           # MACHINE_DIR/nmap
+OPEN_PORTS_CSV=""       # Puertos abiertos detectados (fase rápida)
+LOG_FILE=""             # resultado_<maquina>.txt
 
 # Usuario original que lanzó sudo (o el actual si no hay sudo)
 ORIG_USER="${SUDO_USER:-$USER}"
@@ -58,8 +58,8 @@ ask_yes_no() {
 show_banner() {
     clear
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "   ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.2 CTF Droid Edition${C_RST}"
-    echo -e "                 by 0xAlienSec"
+    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.3 CTF Droid Edition${C_RST}"
+    echo -e "               by 0xAlienSec"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo
 }
@@ -115,12 +115,20 @@ configurar_maquina() {
 
     MACHINE_DIR="${MACHINE_NAME}"
 
+    # <- MODIFICACIÓN: Comprobación de carpeta existente
     if [[ -d "${MACHINE_DIR}" ]]; then
-        echo -e "${C_YEL}[i] La carpeta ${MACHINE_DIR} ya existe, se reutilizará la estructura.${C_RST}"
+        echo -e "${C_YEL}[i] Nombre de carpeta ya creado: ${MACHINE_DIR}.${C_RST}"
+        if ask_yes_no "¿Deseas usar esta estructura existente?"; then
+            echo -e "${C_GRN}[+] OK. Reutilizando la estructura existente.${C_RST}"
+        else
+            echo -e "${C_RED}[!] Proceso abortado. Ingresa un nombre diferente la próxima vez.${C_RST}"
+            exit 1
+        fi
     else
         mkdir -p "${MACHINE_DIR}"/{nmap,exploit,otros}
         echo -e "${C_GRN}[+] Estructura creada: ${MACHINE_DIR}/{nmap,exploit,otros}${C_RST}"
     fi
+    # Fin MODIFICACIÓN
 
     OUTPUT_DIR="${MACHINE_DIR}/nmap"
     LOG_FILE="${MACHINE_DIR}/resultado_${MACHINE_NAME}.txt"
@@ -150,6 +158,17 @@ leer_ip_objetivo() {
         exit 1
     fi
 
+    # <- MODIFICACIÓN: Validación de conectividad con ping
+    echo -e "${C_BLU}[*] Comprobando conectividad (ping -c 1 -W 1)...${C_RST}"
+    if ! ping -c 1 -W 1 "${TARGET_IP}" >/dev/null 2>&1; then
+        echo -e "${C_RED}[!] La máquina (${TARGET_IP}) NO responde a ping.${C_RST}"
+        echo -e "${C_YEL}[!] REVERSANDO todo e indicando: Revisa tu conexión a la máquina o si está encendida.${C_RST}"
+        echo -e "${C_CYN}[!] IMPORTANTE: La carpeta ${MACHINE_DIR} no ha sido eliminada. La puedes reutilizar.${C_RST}"
+        exit 1
+    fi
+    # Fin MODIFICACIÓN
+    
+    echo -e "${C_GRN}[+] Conectividad OK.${C_RST}"
     echo -e "${C_YEL}[TARGET]: ${TARGET_IP}${C_RST}"
     echo
 
@@ -158,6 +177,8 @@ leer_ip_objetivo() {
 
 # --- [3] Fases principales de Nmap ---
 detectar_ttl_y_os() {
+# ... (Función sin cambios)
+# ...
     local host="$1"
     echo -e "${C_BLU}[*] FASE 1: Detectando OS (TTL)${C_RST}"
     local ttl
@@ -170,9 +191,9 @@ detectar_ttl_y_os() {
     fi
 
     local os="Desconocido"
-    if    (( ttl <= 64 ));  then os="Linux/Unix (TTL: ${ttl})"
+    if   (( ttl <= 64 ));  then os="Linux/Unix (TTL: ${ttl})"
     elif (( ttl <= 128 )); then os="Windows (TTL: ${ttl})"
-    else                        os="Otro (TTL: ${ttl})"
+    else                       os="Otro (TTL: ${ttl})"
     fi
 
     echo -e "${C_GRN}[+] Target: ${os}${C_RST}"
@@ -180,6 +201,8 @@ detectar_ttl_y_os() {
 }
 
 escaneo_nmap_rapido() {
+# ... (Función sin cambios)
+# ...
     local host="$1"
     echo
     echo -e "${C_BLU}[*] FASE 2: Discovery Rápido (SYN)${C_RST}"
@@ -205,6 +228,8 @@ escaneo_nmap_rapido() {
 }
 
 escaneo_nmap_agresivo() {
+# ... (Función sin cambios)
+# ...
     local host="$1"
     local port_list="$2"
     local base_name="${host}_version_scan"
@@ -237,6 +262,8 @@ escaneo_nmap_agresivo() {
 }
 
 generar_html() {
+# ... (Función sin cambios)
+# ...
     local xml_in="$1"
     local html_out="$2"
     echo
@@ -254,6 +281,8 @@ generar_html() {
 
 # --- [3B] Generar droide para escaneo de vulnerabilidades ---
 generar_droide_vuln() {
+# ... (Función sin cambios)
+# ...
     local host="$1"
     local port_list="$2"
 
@@ -267,7 +296,7 @@ generar_droide_vuln() {
 # droid.sh - Escáner de vulnerabilidades (Nmap --script vuln)
 # Generado automáticamente por 0xAlienSec
 # Ejecutar SIEMPRE con sudo dentro de la carpeta de la máquina:
-#   sudo ./droid.sh
+#     sudo ./droid.sh
 #
 set -euo pipefail
 
@@ -311,12 +340,14 @@ EOF
 
     echo
     echo -e "${C_YEL}[VULNS] Para un escaneo más profundo de vulnerabilidades ejecuta el droide:${C_RST}"
-    echo -e "        cd ${MACHINE_DIR} && sudo ./droid.sh"
+    echo -e "         cd ${MACHINE_DIR} && sudo ./droid.sh"
     echo
 }
 
 # --- [4] ENUMWEB por puerto HTTP ---
 enum_web_port() {
+# ... (Función sin cambios)
+# ...
     local host="$1"
     local port="$2"
 
@@ -419,6 +450,8 @@ enum_web_port() {
 
 # --- [5] Sugerencias según puertos abiertos ---
 sugerencias_puertos() {
+# ... (Función sin cambios)
+# ...
     [[ -z "${OPEN_PORTS_CSV}" ]] && return
 
     local has_ssh=0 has_ftp=0 has_http=0 has_smb=0 has_rdp=0 has_mysql=0 has_mssql=0 has_smtp=0 has_redis=0
@@ -427,8 +460,8 @@ sugerencias_puertos() {
 
     for p in "${PORT_ARRAY[@]}"; do
         case "${p}" in
-            22)   has_ssh=1 ;;
-            21)   has_ftp=1 ;;
+            22)    has_ssh=1 ;;
+            21)    has_ftp=1 ;;
             80|443|8080|8000|8443) has_http=1 ;;
             139|445) has_smb=1 ;;
             3389) has_rdp=1 ;;
@@ -448,63 +481,63 @@ sugerencias_puertos() {
     if (( has_ssh )); then
         log "- Puerto 22 (SSH, típico Linux):"
         log "  TIP: Probar conexión directa (ssh usuario@${TARGET_IP}) o usar Hydra para fuerza bruta controlada."
-        log "       También puedes usar ssh-audit o enum de claves débiles."
+        log "        También puedes usar ssh-audit o enum de claves débiles."
         log ""
     fi
 
     if (( has_ftp )); then
         log "- Puerto 21 (FTP):"
         log "  TIP: Probar acceso anónimo (ftp ${TARGET_IP}), revisar permisos de lectura/escritura."
-        log "       Usar nmap --script ftp-anon, ftp-brute o Hydra para usuarios/contraseñas."
+        log "        Usar nmap --script ftp-anon, ftp-brute o Hydra para usuarios/contraseñas."
         log ""
     fi
 
     if (( has_http )); then
         log "- Puertos HTTP/HTTPS (80,443,8080,8000,8443):"
         log "  TIP: Navegar con el navegador o Burp Suite, usar whatweb/wappalyzer para fingerprint,"
-        log "       aplicar fuzzing de rutas con gobuster/ffuf y buscar paneles de login o backups."
+        log "        aplicar fuzzing de rutas con gobuster/ffuf y buscar paneles de login o backups."
         log ""
     fi
 
     if (( has_smb )); then
         log "- Puertos 139/445 (SMB en Linux/Windows):"
         log "  TIP: Usar smbclient, enum4linux-ng o crackmapexec/netexec para enumerar shares, usuarios y sesiones."
-        log "       Revisar permisos débiles en recursos compartidos y probar autenticación con credenciales conocidas."
+        log "        Revisar permisos débiles en recursos compartidos y probar autenticación con credenciales conocidas."
         log ""
     fi
 
     if (( has_rdp )); then
         log "- Puerto 3389 (RDP, típico Windows):"
         log "  TIP: Probar conexión con xfreerdp / rdesktop, revisar si exige NLA."
-        log "       En escenarios de password spraying, usar Hydra o crowbar con mucho cuidado."
+        log "        En escenarios de password spraying, usar Hydra o crowbar con mucho cuidado."
         log ""
     fi
 
     if (( has_mysql )); then
         log "- Puerto 3306 (MySQL):"
         log "  TIP: Probar conexión con mysql -h ${TARGET_IP} -u root -p o usuarios comunes."
-        log "       Usar nmap --script mysql-* para enum de cuentas, bases de datos y configuraciones débiles."
+        log "        Usar nmap --script mysql-* para enum de cuentas, bases de datos y configuraciones débiles."
         log ""
     fi
 
     if (( has_mssql )); then
         log "- Puerto 1433 (MSSQL):"
         log "  TIP: Usar impacket-mssqlclient para conectarte con credenciales válidas."
-        log "       Revisar si existe xp_cmdshell habilitado para ejecución de comandos."
+        log "        Revisar si existe xp_cmdshell habilitado para ejecución de comandos."
         log ""
     fi
 
     if (( has_smtp )); then
         log "- Puertos 25/587 (SMTP):"
         log "  TIP: Hacer VRFY/EXPN (si están habilitados) para enum de usuarios."
-        log "       Usar smtp-user-enum y revisar banners para identificar software y versión."
+        log "        Usar smtp-user-enum y revisar banners para identificar software y versión."
         log ""
     fi
 
     if (( has_redis )); then
         log "- Puerto 6379 (Redis):"
         log "  TIP: Intentar conexión sin autenticación con redis-cli -h ${TARGET_IP}."
-        log "       Revisar si es posible escribir claves o abusar de configuraciones por defecto."
+        log "        Revisar si es posible escribir claves o abusar de configuraciones por defecto."
         log ""
     fi
 }
