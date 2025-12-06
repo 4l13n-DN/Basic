@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 #    TTL & Web Enum Scanner :: by 0xAlienSec
-#    v2.0
+#    v2.0 Hunter Edition
 #
 set -euo pipefail
 
@@ -139,6 +139,48 @@ EOF
 
     chown -R "${ORIG_USER}:${ORIG_USER}" "${MACHINE_DIR}"
     chmod -R 775 "${MACHINE_DIR}"
+}
+
+# --- [NUEVO] Generar Plantilla de Notas ---
+generar_plantilla_notas() {
+    local notas_file="${MACHINE_DIR}/notas_hacking.md"
+    
+    if [[ ! -f "${notas_file}" ]]; then
+        cat > "${notas_file}" <<EOF
+# Notas de Hacking: ${MACHINE_NAME}
+Target IP: ${TARGET_IP}
+Fecha: $(date)
+
+## 1. Reconocimiento
+- [ ] Puertos Abiertos: 
+- [ ] OS Detectado: 
+
+## 2. Enumeración
+### Web
+- Tecnologías:
+- Directorios Interesantes:
+
+### Otros Servicios (SMB, SSH, FTP)
+- Usuarios encontrados:
+- Recursos compartidos:
+
+## 3. Vulnerabilidades Potenciales
+- CVEs:
+- Misconfigurations:
+
+## 4. Credenciales
+| Usuario | Password | Hash | Servicio |
+|---------|----------|------|----------|
+|         |          |      |          |
+
+## 5. Flags
+[ ] User Flag:
+[ ] Root Flag:
+EOF
+        # Asegurar permisos para el alumno
+        chown "${ORIG_USER}:${ORIG_USER}" "${notas_file}"
+        echo -e "${C_GRN}[+] Plantilla de notas creada: ${notas_file}${C_RST}"
+    fi
 }
 
 leer_ip_objetivo() {
@@ -376,106 +418,6 @@ enum_web_port() {
     echo -e "${C_GRN}[OK] Resultados en: ${web_dir}${C_RST}"
 }
 
-# --- [5] Sugerencias Restauradas ---
-sugerencias_puertos() {
-    [[ -z "${OPEN_PORTS_CSV}" ]] && return
-
-    # Parsear puertos a flags
-    local has_ssh=0 has_ftp=0 has_http=0 has_smb=0 has_rdp=0 has_mysql=0 has_mssql=0 has_smtp=0 has_redis=0
-    IFS=',' read -r -a PORT_ARRAY <<< "${OPEN_PORTS_CSV}"
-
-    for p in "${PORT_ARRAY[@]}"; do
-        case "${p}" in
-            22)    has_ssh=1 ;;
-            21)    has_ftp=1 ;;
-            80|443|8080|8000|8443) has_http=1 ;;
-            139|445) has_smb=1 ;;
-            3389) has_rdp=1 ;;
-            3306) has_mysql=1 ;;
-            1433) has_mssql=1 ;;
-            25|587) has_smtp=1 ;;
-            6379) has_redis=1 ;;
-        esac
-    done
-
-    log ""
-    log ""
-    log ""    
-    log ""
-    log ""
-    log "" 
-    log ""
-    log ""
-    log "" 
-    log "=== Sugerencias de próximos pasos (no obligatorias) ==="
-    log "DISCLAIMER: Estas sugerencias son orientativas para laboratorio/CTF."
-    log "No son comandos que deban ejecutarse siempre en un entorno real."
-    log ""
-
-    if (( has_ssh )); then
-        log "- Puerto 22 (SSH, típico Linux):"
-        log "  TIP: Probar conexión directa (ssh usuario@${TARGET_IP}) o usar Hydra para fuerza bruta controlada."
-        log "        También puedes usar ssh-audit o enum de claves débiles."
-        log ""
-    fi
-
-    if (( has_ftp )); then
-        log "- Puerto 21 (FTP):"
-        log "  TIP: Probar acceso anónimo (ftp ${TARGET_IP}), revisar permisos de lectura/escritura."
-        log "        Usar nmap --script ftp-anon, ftp-brute o Hydra para usuarios/contraseñas."
-        log ""
-    fi
-
-    if (( has_http )); then
-        log "- Puertos HTTP/HTTPS (80,443,8080,8000,8443):"
-        log "  TIP: Navegar con el navegador o Burp Suite, usar whatweb/wappalyzer para fingerprint,"
-        log "        aplicar fuzzing de rutas con gobuster/ffuf y buscar paneles de login o backups."
-        log ""
-    fi
-
-    if (( has_smb )); then
-        log "- Puertos 139/445 (SMB en Linux/Windows):"
-        log "  TIP: Usar smbclient, enum4linux-ng o crackmapexec/netexec para enumerar shares, usuarios y sesiones."
-        log "        Revisar permisos débiles en recursos compartidos y probar autenticación con credenciales conocidas."
-        log ""
-    fi
-
-    if (( has_rdp )); then
-        log "- Puerto 3389 (RDP, típico Windows):"
-        log "  TIP: Probar conexión con xfreerdp / rdesktop, revisar si exige NLA."
-        log "        En escenarios de password spraying, usar Hydra o crowbar con mucho cuidado."
-        log ""
-    fi
-
-    if (( has_mysql )); then
-        log "- Puerto 3306 (MySQL):"
-        log "  TIP: Probar conexión con mysql -h ${TARGET_IP} -u root -p o usuarios comunes."
-        log "        Usar nmap --script mysql-* para enum de cuentas, bases de datos y configuraciones débiles."
-        log ""
-    fi
-
-    if (( has_mssql )); then
-        log "- Puerto 1433 (MSSQL):"
-        log "  TIP: Usar impacket-mssqlclient para conectarte con credenciales válidas."
-        log "        Revisar si existe xp_cmdshell habilitado para ejecución de comandos."
-        log ""
-    fi
-
-    if (( has_smtp )); then
-        log "- Puertos 25/587 (SMTP):"
-        log "  TIP: Hacer VRFY/EXPN (si están habilitados) para enum de usuarios."
-        log "        Usar smtp-user-enum y revisar banners para identificar software y versión."
-        log ""
-    fi
-
-    if (( has_redis )); then
-        log "- Puerto 6379 (Redis):"
-        log "  TIP: Intentar conexión sin autenticación con redis-cli -h ${TARGET_IP}."
-        log "        Revisar si es posible escribir claves o abusar de configuraciones por defecto."
-        log ""
-    fi
-}
-
 # --- [6] Main ---
 main() {
     check_deps
@@ -483,6 +425,9 @@ main() {
     show_banner
     configurar_maquina
     leer_ip_objetivo
+
+    # Aquí generamos la plantilla vacía para que el alumno empiece a documentar
+    generar_plantilla_notas
 
     detectar_ttl_y_os "${TARGET_IP}"
     escaneo_nmap_rapido "${TARGET_IP}"
@@ -513,8 +458,6 @@ main() {
             enum_web_port "${TARGET_IP}" "${port}"
         done
     fi
-
-    sugerencias_puertos
 
     echo
     echo -e "${C_GRN}[i] Log final: ${LOG_FILE}${C_RST}"
