@@ -518,7 +518,7 @@ main() {
 
     echo
     echo -e "${C_GRN}[i] Log final: ${LOG_FILE}${C_RST}"
-    echo -e "${C_BLU}=== HACK THE PLANET ===${C_RST}"
+    echo -e "${C_BLU}=== 4l13N IS HERE ===${C_RST}"
 }
 
 main "$@"
