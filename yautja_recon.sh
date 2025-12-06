@@ -186,11 +186,11 @@ escaneo_nmap_rapido() {
     local host="$1"
     echo
     echo -e "${C_BLU}[*] FASE 2: Discovery Rápido (SYN)${C_RST}"
-    local cmd="nmap -n -Pn -T4 -sS --open -p- --min-rate 3000 ${host}"
+    local cmd="nmap -n -Pn -T4 -sS --open -p- --min-rate 4000 ${host}"
     imprimir_comando "$cmd"
 
     local nmap_out
-    nmap_out=$(nmap -n -Pn -T4 -sS --open -p- --min-rate 3000 "${host}" 2>/dev/null)
+    nmap_out=$(nmap -n -Pn -T4 -sS --open -p- --min-rate 4000 "${host}" 2>/dev/null)
     local puertos_nl
     puertos_nl=$(echo "${nmap_out}" | grep '^[0-9]' | cut -d'/' -f1)
 
