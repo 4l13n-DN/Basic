@@ -472,9 +472,33 @@ EOF
 ## 5. Flags
 - [ ] User Flag:
 - [ ] Root Flag:
-- [ ] otra Flag:
-- [ ] otra Flag:
-- [ ] otra Flag:
+
+
+## 6. Otras
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ---
 *Generado por Yautja by 0xAlienSec*
