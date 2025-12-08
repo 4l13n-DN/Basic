@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 #    TTL & Web Enum Scanner :: by 0xAlienSec
-#    v2.5 Hunter Edition
+#    v2.7 Hunter Edition 
 #
 set -euo pipefail
 
@@ -80,8 +80,8 @@ show_banner() {
     clear
     detectar_mi_ip
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.5 Hunter Edition${C_RST}"
-    echo -e "               by 0xAlienSec"
+    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.7 Hunter Edition${C_RST}"
+    echo -e "                by 0xAlienSec"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo -e "    ${C_PUR}MI IP (Atacante):${C_RST} ${ATTACKER_IP}"
     echo -e "${C_BLU}=========================================================${C_RST}"
@@ -170,6 +170,14 @@ leer_ip_objetivo() {
     
     echo -e "${C_GRN}[+] Conectividad OK.${C_RST}"
     echo -e "${C_YEL}[TARGET]: ${TARGET_IP}${C_RST}"
+    
+    # --- [PERSISTENCIA] Crear target.txt ---
+    local target_file="${MACHINE_DIR}/target.txt"
+    echo "${TARGET_IP}" > "${target_file}"
+    chown "${ORIG_USER}:${ORIG_USER}" "${target_file}"
+    
+    echo -e "${C_CYN}[i] IP guardada en: ${target_file}${C_RST}"
+    echo -e "${C_CYN}[i] Tip: Ejecuta 'export IP=\$(<${target_file})' si necesitas la variable en tu terminal.${C_RST}"
     echo
     
     log_info "Objetivo fijado: ${TARGET_IP}"
@@ -185,9 +193,9 @@ detectar_ttl_y_os() {
 
     local os="Desconocido"
     [[ -n "$ttl" ]] && {
-        if   (( ttl <= 64 ));  then os="Linux/Unix (TTL: ${ttl})"
+        if    (( ttl <= 64 ));  then os="Linux/Unix (TTL: ${ttl})"
         elif (( ttl <= 128 )); then os="Windows (TTL: ${ttl})"
-        else                       os="Otro (TTL: ${ttl})"
+        else                        os="Otro (TTL: ${ttl})"
         fi
     }
     echo -e "${C_GRN}[+] Target: ${os}${C_RST}"
@@ -251,7 +259,7 @@ generar_html() {
     fi
 }
 
-# --- [3B] Generar droide AUTO-DESTRUCT ---
+# --- [3B] Generar droide BACKGROUND & AUTO-DESTRUCT ---
 generar_droide_vuln() {
     local host="$1"
     local port_list="$2"
@@ -259,39 +267,43 @@ generar_droide_vuln() {
 
     local droid_path="${MACHINE_DIR}/droid.sh"
 
+    # Generamos el script
     cat > "${droid_path}" <<EOF
 #!/usr/bin/env bash
 # Droide de Vulnerabilidades - AutoDestruct Edition
-set -euo pipefail
-
-if [[ "\${EUID}" -ne 0 ]]; then
-    echo "Ejecuta con sudo."
-    exit 1
-fi
+set -uo pipefail
 
 HOST="${host}"
 PORT_LIST="${port_list}"
-OUTPUT_DIR="nmap"
+OUTPUT_DIR="${MACHINE_DIR}/nmap"
 BASE_NAME="\${HOST}_vuln_scan"
 
-echo "Ejecutando escaneo vuln sobre \${HOST}..."
-nmap -n -Pn --min-rate 3000 -T4 --script vuln --script-timeout 60s -vv -p"\${PORT_LIST}" -oA "\${OUTPUT_DIR}/\${BASE_NAME}" "\${HOST}"
+# Asegurar directorio
+mkdir -p "\${OUTPUT_DIR}"
+
+# Ejecución silenciosa
+nmap -n -Pn --min-rate 3000 -T4 --script vuln --script-timeout 60s -p"\${PORT_LIST}" -oA "\${OUTPUT_DIR}/\${BASE_NAME}" "\${HOST}" >/dev/null 2>&1
 
 if [[ -f "\${OUTPUT_DIR}/\${BASE_NAME}.xml" ]]; then
-    xsltproc "\${OUTPUT_DIR}/\${BASE_NAME}.xml" -o "\${OUTPUT_DIR}/\${BASE_NAME}.html"
+    xsltproc "\${OUTPUT_DIR}/\${BASE_NAME}.xml" -o "\${OUTPUT_DIR}/\${BASE_NAME}.html" >/dev/null 2>&1
 fi
 
-echo "Auto-destruyendo este script..."
+# Autodestrucción
 rm -- "\$0"
 EOF
 
     chmod +x "${droid_path}"
     
-    # --- RECUPERADO: Instrucción explícita de cómo ejecutarlo ---
-    echo -e "${C_GRN}[+] Droide generado: ${droid_path}${C_RST}"
-    echo -e "${C_YEL}[VULNS] Ejecutar manual: cd ${MACHINE_DIR} && sudo ./droid.sh${C_RST}"
+    echo -e "${C_GRN}[+] Droide generado y armado.${C_RST}"
+    echo -e "${C_CYN}[>>] LANZANDO DROIDE EN SEGUNDO PLANO...${C_RST}"
     
-    log_info "Droide generado en ${droid_path}"
+    # Ejecución en background con nohup para persistir si se cierra terminal
+    nohup "${droid_path}" >/dev/null 2>&1 &
+    
+    local droid_pid=$!
+    echo -e "${C_YEL}[i] Droide cazando con PID: ${droid_pid}. Se autodestruirá al terminar.${C_RST}"
+    
+    log_info "Droide lanzado en background (PID: ${droid_pid}). Script: ${droid_path}"
 }
 
 # --- [4] ENUMWEB ---
@@ -337,20 +349,51 @@ enum_web_port() {
         log_info "Whatweb no instalado."
     fi
 
-    # --- Gobuster ---
+    # --- Gobuster [MEJORADO] ---
     echo
     echo "--- Gobuster ---"
     if command -v gobuster >/dev/null 2>&1; then
-        local wordlist="/usr/share/wordlists/dirb/common.txt"
         
-        if [[ ! -f "${wordlist}" ]]; then
-            echo -e "${C_RED}[!] No se encuentra el diccionario ($wordlist).${C_RST}"
-            log_info "Gobuster saltado: falta diccionario."
+        # Selección de diccionario
+        local default_wl="/usr/share/wordlists/dirb/common.txt"
+        local chosen_wl="${default_wl}"
+        local selection_done=false
+
+        echo -e "${C_YEL}[?] Selección de diccionario para Gobuster:${C_RST}"
+        echo -e "    1) Default (${default_wl})"
+        echo -e "    2) Custom (Ingresar ruta)"
+        echo -en "${C_YEL}>> Selecciona [1/2]: ${C_RST}"
+        read -r wl_option
+
+        if [[ "${wl_option}" == "2" ]]; then
+            echo -en "${C_YEL}>> Ingresa la ruta completa del diccionario: ${C_RST}"
+            read -r custom_wl
+            # Remover comillas simples o dobles
+            custom_wl="${custom_wl%\"}"
+            custom_wl="${custom_wl#\"}"
+            custom_wl="${custom_wl%\'}"
+            custom_wl="${custom_wl#\'}"
+
+            if [[ -f "${custom_wl}" ]]; then
+                chosen_wl="${custom_wl}"
+                echo -e "${C_GRN}[+] Diccionario personalizado validado.${C_RST}"
+            else
+                echo -e "${C_RED}[!] El archivo no existe: ${custom_wl}${C_RST}"
+                echo -e "${C_YEL}[i] Usando diccionario por defecto como fallback.${C_RST}"
+            fi
         else
-            local cmd_gobuster="gobuster dir -u ${base_url} -w ${wordlist} -x txt,php,zip -s 200,204,301,302,307,403 -b '' -t 200 -k --no-error -o ${web_dir}/gobuster.txt"
+            echo -e "${C_GRN}[+] Usando diccionario por defecto.${C_RST}"
+        fi
+
+        # Comprobar si el diccionario final existe
+        if [[ ! -f "${chosen_wl}" ]]; then
+            echo -e "${C_RED}[!] ERROR CRÍTICO: No se encuentra el diccionario (${chosen_wl}).${C_RST}"
+            log_info "Gobuster saltado: diccionario no encontrado."
+        else
+            local cmd_gobuster="gobuster dir -u ${base_url} -w ${chosen_wl} -x txt,php,zip -s 200,204,301,302,307,403 -b '' -t 200 -k --no-error -o ${web_dir}/gobuster.txt"
             imprimir_comando "$cmd_gobuster"
             
-            gobuster dir -u "${base_url}" -w "${wordlist}" -x txt,php,zip \
+            gobuster dir -u "${base_url}" -w "${chosen_wl}" -x txt,php,zip \
                 -s 200,204,301,302,307,403 -b "" -t 200 -k --no-error -o "${web_dir}/gobuster.txt" >/dev/null || true
             
             if [[ -f "${web_dir}/gobuster.txt" ]]; then
@@ -358,7 +401,7 @@ enum_web_port() {
                 hits=$(grep -c "Status:" "${web_dir}/gobuster.txt" || true)
                 echo -e "${C_GRN}[+] Gobuster finalizado. Hits: ${hits}${C_RST}"
                 
-                log_data "--- Resultados Gobuster ---"
+                log_data "--- Resultados Gobuster (${chosen_wl}) ---"
                 grep "Status:" "${web_dir}/gobuster.txt" >> "${LOG_FILE}" || true
             fi
         fi
@@ -421,12 +464,16 @@ EOF
     cat >> "${notas_file}" <<EOF
 
 ## 3. Vulnerabilidades Encontradas
+> ⚠️ **NOTA:** El escaneo de vulnerabilidades se ejecuta en **segundo plano**.
+> Revisa posteriormente los archivos en: \`nmap/*_vuln_scan.html\` o \`.nmap\`
+> Si encuentras algo, anótalo aquí abajo:
+
 - [ ] CVEs: 
 - [ ] CWL:
 - [ ] Otras:
 
 ## 4. Credenciales
-|      Usuario     |      Password     |     Hash      |     Servicio      |
+|     Usuario      |     Password      |     Hash      |     Servicio      |
 |------------------|-------------------|---------------|-------------------|
 |                  |                   |               |                   |
 
