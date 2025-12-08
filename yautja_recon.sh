@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 #    TTL & Web Enum Scanner :: by 0xAlienSec
-#    v2.7 Hunter Edition 
+#    v2.8 Hunter Edition
 #
 set -euo pipefail
 
@@ -80,7 +80,7 @@ show_banner() {
     clear
     detectar_mi_ip
     echo -e "${C_BLU}=========================================================${C_RST}"
-    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.7 Hunter Edition${C_RST}"
+    echo -e "    ${C_BOLD}TTL & Web Enum Scanner${C_RST} :: ${C_YEL}v2.8 Hunter Edition${C_RST}"
     echo -e "                by 0xAlienSec"
     echo -e "${C_BLU}=========================================================${C_RST}"
     echo -e "    ${C_PUR}MI IP (Atacante):${C_RST} ${ATTACKER_IP}"
@@ -259,7 +259,7 @@ generar_html() {
     fi
 }
 
-# --- [3B] Generar droide BACKGROUND & AUTO-DESTRUCT ---
+# --- [3B] Generar droide MANUAL ---
 generar_droide_vuln() {
     local host="$1"
     local port_list="$2"
@@ -271,39 +271,36 @@ generar_droide_vuln() {
     cat > "${droid_path}" <<EOF
 #!/usr/bin/env bash
 # Droide de Vulnerabilidades - AutoDestruct Edition
-set -uo pipefail
+set -euo pipefail
+
+if [[ "\${EUID}" -ne 0 ]]; then
+    echo "Ejecuta con sudo."
+    exit 1
+fi
 
 HOST="${host}"
 PORT_LIST="${port_list}"
-OUTPUT_DIR="${MACHINE_DIR}/nmap"
+OUTPUT_DIR="nmap"
 BASE_NAME="\${HOST}_vuln_scan"
 
-# Asegurar directorio
-mkdir -p "\${OUTPUT_DIR}"
-
-# Ejecución silenciosa
-nmap -n -Pn --min-rate 3000 -T4 --script vuln --script-timeout 60s -p"\${PORT_LIST}" -oA "\${OUTPUT_DIR}/\${BASE_NAME}" "\${HOST}" >/dev/null 2>&1
+echo "Ejecutando escaneo vuln sobre \${HOST}..."
+nmap -n -Pn --min-rate 3000 -T4 --script vuln --script-timeout 60s -vv -p"\${PORT_LIST}" -oA "\${OUTPUT_DIR}/\${BASE_NAME}" "\${HOST}"
 
 if [[ -f "\${OUTPUT_DIR}/\${BASE_NAME}.xml" ]]; then
-    xsltproc "\${OUTPUT_DIR}/\${BASE_NAME}.xml" -o "\${OUTPUT_DIR}/\${BASE_NAME}.html" >/dev/null 2>&1
+    xsltproc "\${OUTPUT_DIR}/\${BASE_NAME}.xml" -o "\${OUTPUT_DIR}/\${BASE_NAME}.html"
 fi
 
-# Autodestrucción
+echo "Auto-destruyendo este script..."
 rm -- "\$0"
 EOF
 
     chmod +x "${droid_path}"
     
-    echo -e "${C_GRN}[+] Droide generado y armado.${C_RST}"
-    echo -e "${C_CYN}[>>] LANZANDO DROIDE EN SEGUNDO PLANO...${C_RST}"
+    # --- RECUPERADO: Instrucción explícita de cómo ejecutarlo ---
+    echo -e "${C_GRN}[+] Droide generado: ${droid_path}${C_RST}"
+    echo -e "${C_YEL}[VULNS] Ejecutar manual: cd ${MACHINE_DIR} && sudo ./droid.sh${C_RST}"
     
-    # Ejecución en background con nohup para persistir si se cierra terminal
-    nohup "${droid_path}" >/dev/null 2>&1 &
-    
-    local droid_pid=$!
-    echo -e "${C_YEL}[i] Droide cazando con PID: ${droid_pid}. Se autodestruirá al terminar.${C_RST}"
-    
-    log_info "Droide lanzado en background (PID: ${droid_pid}). Script: ${droid_path}"
+    log_info "Droide generado en ${droid_path} (esperando ejecución manual)."
 }
 
 # --- [4] ENUMWEB ---
@@ -349,7 +346,7 @@ enum_web_port() {
         log_info "Whatweb no instalado."
     fi
 
-    # --- Gobuster [MEJORADO] ---
+    # --- Gobuster [CON SELECTOR] ---
     echo
     echo "--- Gobuster ---"
     if command -v gobuster >/dev/null 2>&1; then
@@ -357,7 +354,6 @@ enum_web_port() {
         # Selección de diccionario
         local default_wl="/usr/share/wordlists/dirb/common.txt"
         local chosen_wl="${default_wl}"
-        local selection_done=false
 
         echo -e "${C_YEL}[?] Selección de diccionario para Gobuster:${C_RST}"
         echo -e "    1) Default (${default_wl})"
@@ -368,7 +364,7 @@ enum_web_port() {
         if [[ "${wl_option}" == "2" ]]; then
             echo -en "${C_YEL}>> Ingresa la ruta completa del diccionario: ${C_RST}"
             read -r custom_wl
-            # Remover comillas simples o dobles
+            # Remover comillas
             custom_wl="${custom_wl%\"}"
             custom_wl="${custom_wl#\"}"
             custom_wl="${custom_wl%\'}"
@@ -464,10 +460,6 @@ EOF
     cat >> "${notas_file}" <<EOF
 
 ## 3. Vulnerabilidades Encontradas
-> ⚠️ **NOTA:** El escaneo de vulnerabilidades se ejecuta en **segundo plano**.
-> Revisa posteriormente los archivos en: \`nmap/*_vuln_scan.html\` o \`.nmap\`
-> Si encuentras algo, anótalo aquí abajo:
-
 - [ ] CVEs: 
 - [ ] CWL:
 - [ ] Otras:
